@@ -34,6 +34,15 @@ class Tenant:
     tilda_notify_url: str
     tilda_success_url: str = ""
     tilda_fail_url: str = ""
+    # Запасные атрибуты чека для товаров, которых нет в таблице products
+    # (например, доставка или новый товар, который ещё не добавили).
+    # Коды см. tilda-integration/fiscal-receipt.md.
+    default_tax_rate: str = "6"
+    default_item_type: str = "1"
+    default_calc_mode: str = "4"
+    # Нужны банку в каждом запросе с чеком (не имеют дефолта от банка).
+    inn: str = ""
+    tax_system_code: str = "2"
 
     @property
     def api_host(self) -> str:
@@ -79,10 +88,28 @@ def init_db() -> None:
                 tilda_notify_url TEXT NOT NULL,
                 tilda_success_url TEXT NOT NULL DEFAULT '',
                 tilda_fail_url TEXT NOT NULL DEFAULT '',
+                default_tax_rate TEXT NOT NULL DEFAULT '6',
+                default_item_type TEXT NOT NULL DEFAULT '1',
+                default_calc_mode TEXT NOT NULL DEFAULT '4',
+                inn TEXT NOT NULL DEFAULT '',
+                tax_system_code TEXT NOT NULL DEFAULT '2',
                 created_at TEXT NOT NULL
             )
             """
         )
+        # На случай, если БД была создана более ранней версией без этих колонок.
+        for col, default in (
+            ("default_tax_rate", "6"),
+            ("default_item_type", "1"),
+            ("default_calc_mode", "4"),
+            ("inn", ""),
+            ("tax_system_code", "2"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE tenants ADD COLUMN {col} TEXT NOT NULL DEFAULT '{default}'")
+            except sqlite3.OperationalError:
+                pass  # колонка уже существует
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS orders (
@@ -105,6 +132,18 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS products (
+                shop_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                tax_rate TEXT NOT NULL,
+                item_type TEXT NOT NULL,
+                calc_mode TEXT NOT NULL,
+                PRIMARY KEY (shop_id, name)
+            )
+            """
+        )
 
 
 # ---------- Торговые точки ----------
@@ -121,6 +160,11 @@ def add_tenant(
     bank_owner_type: str = "MultiMerchant",
     tilda_success_url: str = "",
     tilda_fail_url: str = "",
+    default_tax_rate: str = "6",
+    default_item_type: str = "1",
+    default_calc_mode: str = "4",
+    inn: str = "",
+    tax_system_code: str = "2",
 ) -> None:
     with _conn() as conn:
         conn.execute(
@@ -128,8 +172,10 @@ def add_tenant(
             INSERT INTO tenants (
                 shop_id, bank_env, bank_owner_type, bank_login, bank_password_enc,
                 bank_terminal_id, tilda_login, tilda_order_secret_enc, tilda_notify_url,
-                tilda_success_url, tilda_fail_url, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tilda_success_url, tilda_fail_url,
+                default_tax_rate, default_item_type, default_calc_mode,
+                inn, tax_system_code, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(shop_id) DO UPDATE SET
                 bank_env=excluded.bank_env,
                 bank_owner_type=excluded.bank_owner_type,
@@ -140,7 +186,12 @@ def add_tenant(
                 tilda_order_secret_enc=excluded.tilda_order_secret_enc,
                 tilda_notify_url=excluded.tilda_notify_url,
                 tilda_success_url=excluded.tilda_success_url,
-                tilda_fail_url=excluded.tilda_fail_url
+                tilda_fail_url=excluded.tilda_fail_url,
+                default_tax_rate=excluded.default_tax_rate,
+                default_item_type=excluded.default_item_type,
+                default_calc_mode=excluded.default_calc_mode,
+                inn=excluded.inn,
+                tax_system_code=excluded.tax_system_code
             """,
             (
                 shop_id,
@@ -154,6 +205,11 @@ def add_tenant(
                 tilda_notify_url,
                 tilda_success_url,
                 tilda_fail_url,
+                default_tax_rate,
+                default_item_type,
+                default_calc_mode,
+                inn,
+                tax_system_code,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -176,6 +232,11 @@ def get_tenant(shop_id: str) -> Tenant | None:
         tilda_notify_url=row["tilda_notify_url"],
         tilda_success_url=row["tilda_success_url"] or "",
         tilda_fail_url=row["tilda_fail_url"] or "",
+        default_tax_rate=row["default_tax_rate"] or "6",
+        default_item_type=row["default_item_type"] or "1",
+        default_calc_mode=row["default_calc_mode"] or "4",
+        inn=row["inn"] or "",
+        tax_system_code=row["tax_system_code"] or "2",
     )
 
 
@@ -229,3 +290,41 @@ def mark_tilda_link_notified(tilda_order_id: str) -> None:
         conn.execute(
             "UPDATE tilda_links SET notified = 1 WHERE tilda_order_id = ?", (tilda_order_id,)
         )
+
+
+# ---------- Товары (налоговые атрибуты чека по названию товара) ----------
+
+def add_product(shop_id: str, name: str, tax_rate: str, item_type: str, calc_mode: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO products (shop_id, name, tax_rate, item_type, calc_mode)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(shop_id, name) DO UPDATE SET
+                tax_rate=excluded.tax_rate,
+                item_type=excluded.item_type,
+                calc_mode=excluded.calc_mode
+            """,
+            (shop_id, name, tax_rate, item_type, calc_mode),
+        )
+
+
+def get_product(shop_id: str, name: str) -> dict | None:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM products WHERE shop_id = ? AND name = ?", (shop_id, name)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_products(shop_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM products WHERE shop_id = ? ORDER BY name", (shop_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_product(shop_id: str, name: str) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM products WHERE shop_id = ? AND name = ?", (shop_id, name))

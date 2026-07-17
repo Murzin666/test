@@ -39,6 +39,16 @@ class GlobalSettings(BaseSettings):
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
+    def model_post_init(self, __context) -> None:
+        # Частая ошибка конфигурации: в переменную окружения вписывают домен
+        # без схемы (bank-proxy.up.railway.app вместо https://bank-proxy...).
+        # Без схемы ссылка на возврат покупателя после оплаты (hppRedirectUrl)
+        # получается битой — лечим на лету, а не падаем молча.
+        url = self.public_base_url.strip().rstrip("/")
+        if url and not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        self.public_base_url = url
+
 
 @lru_cache
 def get_settings() -> GlobalSettings:

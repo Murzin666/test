@@ -1,3 +1,6 @@
+import json
+import logging
+
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +10,8 @@ from . import bank_client, db
 from .bank_client import BankApiError
 from .config import get_settings
 from .tilda_signature import compute_signature, verify_signature
+
+logger = logging.getLogger("bank_proxy")
 
 settings = get_settings()
 
@@ -55,6 +60,90 @@ async def health():
 
 # ---------- Универсальная платёжная система Tilda (по одному URL на точку) ----------
 
+def _fiscal_code(value: str):
+    """Коды банка (taxRate/type/mode) для ОФД Orange Data — целые числа;
+    для ОФД БИФИТ Онлайн — строки (VAT_20 и т.п.). Приводим к int, если
+    значение чисто числовое, иначе оставляем строкой как есть."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: float) -> dict | None:
+    """
+    Собирает блок receipt для запроса в банк на основе состава корзины,
+    присланного Tilda (name/quantity/price), и налоговых атрибутов из
+    каталога товаров этой точки (app.db.products, сопоставление по названию).
+    Товары, которых нет в каталоге, получают атрибуты по умолчанию точки —
+    в лог пишется предупреждение, чтобы вы могли их доопределить.
+    Если у точки не указан ИНН (tenant.inn) — чек вообще не формируется:
+    банк требует ИНН в каждом запросе с чеком, дефолта для него нет.
+    """
+    if not tenant.inn:
+        logger.warning("shop_id=%s: ИНН не задан, чек для банка не формируется", shop_id)
+        return None
+
+    try:
+        products = json.loads(products_json or "[]")
+    except (TypeError, ValueError):
+        logger.warning("shop_id=%s: не удалось разобрать products от Tilda: %r", shop_id, products_json)
+        products = []
+
+    items = []
+    for p in products:
+        name = str(p.get("name", "")).strip()
+        try:
+            quantity = float(p.get("quantity", 1) or 1)
+        except (TypeError, ValueError):
+            quantity = 1.0
+        try:
+            price = float(p.get("price", 0) or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if price == 0 and quantity:
+            try:
+                price = float(p.get("total_price", 0) or 0) / quantity
+            except (TypeError, ValueError, ZeroDivisionError):
+                price = 0.0
+
+        catalog_entry = db.get_product(shop_id, name) if name else None
+        if catalog_entry is None:
+            logger.warning(
+                "shop_id=%s: товар %r не найден в каталоге, использую атрибуты по умолчанию точки",
+                shop_id, name,
+            )
+            tax_rate, item_type, calc_mode = tenant.default_tax_rate, tenant.default_item_type, tenant.default_calc_mode
+        else:
+            tax_rate = catalog_entry["tax_rate"]
+            item_type = catalog_entry["item_type"]
+            calc_mode = catalog_entry["calc_mode"]
+
+        items.append(
+            {
+                "desc": name or "Товар",
+                "quantity": quantity,
+                "price": round(price, 2),
+                "taxRate": _fiscal_code(tax_rate),
+                "type": _fiscal_code(item_type),
+                "mode": _fiscal_code(calc_mode),
+            }
+        )
+
+    if not items:
+        # Состав корзины не пришёл или не распарсился — не отправляем банку
+        # пустой/битый чек, лучше вообще без receipt (сработают дефолты банка).
+        logger.warning("shop_id=%s: нет позиций для чека, receipt не отправляется", shop_id)
+        return None
+
+    return {
+        "items": items,
+        "payments": [{"type": 1, "amt": round(amount, 2)}],
+        "taxRid": tenant.inn,
+        "taxSystemCode": _fiscal_code(tenant.tax_system_code),
+    }
+
+
 @app.post("/tilda/{shop_id}/checkout")
 async def tilda_checkout(
     shop_id: str,
@@ -63,6 +152,7 @@ async def tilda_checkout(
     order_amount: str = Form(...),
     signature: str = Form(...),
     client_email: str = Form(""),
+    products: str = Form("[]"),
 ):
     """
     Сюда Tilda перенаправляет браузер покупателя (POST) сразу после
@@ -95,6 +185,10 @@ async def tilda_checkout(
     }
     if client_email:
         order_payload["srcEmail"] = client_email
+
+    receipt = _build_receipt(tenant, shop_id, products, amount)
+    if receipt is not None:
+        order_payload["receipt"] = receipt
 
     order = await bank_client.create_order(tenant, session_id, order_payload)
     bank_order_id = order["order"]["id"]
