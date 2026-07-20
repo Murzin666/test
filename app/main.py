@@ -247,6 +247,8 @@ async def tilda_checkout(
     receipt = _build_receipt(tenant, shop_id, products, tilda_receipt, amount)
     if receipt is not None:
         order_payload["receipt"] = receipt
+    # ВРЕМЕННАЯ ДИАГНОСТИКА: смотрим, что именно уходит в банк
+    logger.warning("shop_id=%s: order_payload ОТПРАВЛЯЕМ В БАНК = %s", shop_id, json.dumps(order_payload, ensure_ascii=False))
 
     order = await bank_client.create_order(tenant, session_id, order_payload)
     bank_order_id = order["order"]["id"]
