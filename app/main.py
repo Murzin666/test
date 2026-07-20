@@ -2,7 +2,7 @@ import json
 import logging
 
 import httpx
-from fastapi import Depends, FastAPI, Form, Header, HTTPException
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
@@ -147,6 +147,7 @@ def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: 
 @app.post("/tilda/{shop_id}/checkout")
 async def tilda_checkout(
     shop_id: str,
+    request: Request,
     login: str = Form(...),
     order_id: str = Form(...),
     order_amount: str = Form(...),
@@ -160,6 +161,12 @@ async def tilda_checkout(
     именно этот адрес указывается в поле "API URL" при настройке
     Универсальной платёжной системы у данного клиента.
     """
+    # ВРЕМЕННАЯ ДИАГНОСТИКА: логируем вообще всё, что прислала Tilda —
+    # чтобы увидеть, не появилось ли новое поле с НДС/ФФД по товару
+    # после включения вкладки "НДС, ФФД" в карточках товаров.
+    raw_form = await request.form()
+    logger.warning("shop_id=%s: RAW TILDA FORM = %s", shop_id, dict(raw_form))
+
     tenant = _get_tenant_or_404(shop_id)
 
     if not verify_signature(tenant.tilda_order_secret, login, order_id, order_amount, signature):
