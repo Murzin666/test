@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -29,6 +30,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     db.init_db()
+    asyncio.create_task(poll_pending_payments())
 
 
 def require_admin(x_admin_key: str = Header(default="")) -> None:
@@ -108,6 +110,9 @@ def _build_receipt(
     except (TypeError, ValueError):
         tilda_receipt = {}
 
+    # ВРЕМЕННАЯ ДИАГНОСТИКА: что реально прислала Tilda в Receipt на этот раз
+    logger.warning("shop_id=%s: RAW Receipt от Tilda = %r", shop_id, tilda_receipt_json)
+
     tilda_items_by_name = {}
     for ri in tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []:
         rname = str(ri.get("name", "")).strip()
@@ -142,6 +147,10 @@ def _build_receipt(
 
         catalog_entry = db.get_product(shop_id, name) if name else None
         if catalog_entry is not None:
+            logger.warning(
+                "shop_id=%s: товар %r — использую РУЧНОЙ КАТАЛОГ (taxRate=%s type=%s mode=%s), Tilda-данные проигнорированы",
+                shop_id, name, catalog_entry["tax_rate"], catalog_entry["item_type"], catalog_entry["calc_mode"],
+            )
             tax_rate = catalog_entry["tax_rate"]
             item_type = catalog_entry["item_type"]
             calc_mode = catalog_entry["calc_mode"]
@@ -261,6 +270,72 @@ async def tilda_checkout(
     return RedirectResponse(pay_url, status_code=302)
 
 
+async def _notify_tilda_paid(tenant: db.Tenant, tilda_order_id: str, bank_order_id: int, amount: float) -> bool:
+    """
+    Отправляет Tilda уведомление об успешной оплате. Используется и из
+    /tilda/{shop_id}/return (когда покупатель вернулся в браузере), и из
+    фонового опроса poll_pending_payments (на случай, если не вернулся).
+    Возвращает True, если уведомление отправлено и БД обновлена.
+    """
+    amount_str = f"{amount:.2f}"
+    sig = compute_signature(tenant.tilda_order_secret, tenant.tilda_login, tilda_order_id, amount_str)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                tenant.tilda_notify_url,
+                data={
+                    "login": tenant.tilda_login,
+                    "order_id": tilda_order_id,
+                    "order_amount": amount_str,
+                    "paid": "1",
+                    "transaction_id": str(bank_order_id),
+                    "signature": sig,
+                },
+            )
+        db.mark_tilda_link_notified(tilda_order_id)
+        return True
+    except httpx.RequestError as exc:
+        logger.warning("shop_id=%s: не удалось отправить уведомление Tilda по заказу %s: %s",
+                        tenant.shop_id, tilda_order_id, exc)
+        return False
+
+
+POLL_INTERVAL_SECONDS = 120
+
+
+async def poll_pending_payments():
+    """
+    Фоновая проверка: раз в POLL_INTERVAL_SECONDS обходит все заказы без
+    отправленного уведомления в Tilda и сам спрашивает у банка статус —
+    не полагаясь на то, вернётся ли покупатель в браузере после оплаты.
+    """
+    while True:
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        try:
+            pending = db.list_unnotified_tilda_links()
+        except Exception as exc:
+            logger.warning("poll_pending_payments: ошибка чтения БД: %s", exc)
+            continue
+
+        for link in pending:
+            shop_id = link["shop_id"]
+            try:
+                tenant = _get_tenant_or_404(shop_id)
+                order = db.get_order(link["bank_order_id"])
+                if order is None:
+                    continue
+                result = await bank_client.get_order_status(tenant, link["bank_order_id"], order["password"])
+                status = result["order"]["status"]
+                if status == "FullyPaid":
+                    ok = await _notify_tilda_paid(tenant, link["tilda_order_id"], link["bank_order_id"], link["amount"])
+                    if ok:
+                        logger.warning("poll_pending_payments: заказ %s (shop_id=%s) оплачен, Tilda уведомлена",
+                                        link["tilda_order_id"], shop_id)
+            except Exception as exc:
+                logger.warning("poll_pending_payments: ошибка по заказу %s (shop_id=%s): %s",
+                                link["tilda_order_id"], shop_id, exc)
+
+
 @app.get("/tilda/{shop_id}/return")
 async def tilda_return(shop_id: str, ref: str):
     """Сюда банк возвращает покупателя после оплаты (hppRedirectUrl)."""
@@ -278,24 +353,7 @@ async def tilda_return(shop_id: str, ref: str):
     status = result["order"]["status"]
 
     if status == "FullyPaid" and not link["notified"]:
-        amount_str = f"{link['amount']:.2f}"
-        sig = compute_signature(tenant.tilda_order_secret, tenant.tilda_login, ref, amount_str)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(
-                    tenant.tilda_notify_url,
-                    data={
-                        "login": tenant.tilda_login,
-                        "order_id": ref,
-                        "order_amount": amount_str,
-                        "paid": "1",
-                        "transaction_id": str(link["bank_order_id"]),
-                        "signature": sig,
-                    },
-                )
-            db.mark_tilda_link_notified(ref)
-        except httpx.RequestError:
-            pass
+        await _notify_tilda_paid(tenant, ref, link["bank_order_id"], link["amount"])
 
     if status == "FullyPaid":
         if tenant.tilda_success_url:

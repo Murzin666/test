@@ -128,10 +128,15 @@ def init_db() -> None:
                 shop_id TEXT NOT NULL,
                 bank_order_id INTEGER NOT NULL,
                 amount REAL NOT NULL,
-                notified INTEGER NOT NULL DEFAULT 0
+                notified INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT ''
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE tilda_links ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # колонка уже существует
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS products (
@@ -271,9 +276,9 @@ def get_order(bank_order_id: int) -> dict | None:
 def save_tilda_link(tilda_order_id: str, shop_id: str, bank_order_id: int, amount: float) -> None:
     with _conn() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO tilda_links (tilda_order_id, shop_id, bank_order_id, amount, notified) "
-            "VALUES (?, ?, ?, ?, 0)",
-            (tilda_order_id, shop_id, bank_order_id, amount),
+            "INSERT OR REPLACE INTO tilda_links (tilda_order_id, shop_id, bank_order_id, amount, notified, created_at) "
+            "VALUES (?, ?, ?, ?, 0, ?)",
+            (tilda_order_id, shop_id, bank_order_id, amount, datetime.now(timezone.utc).isoformat()),
         )
 
 
@@ -290,6 +295,31 @@ def mark_tilda_link_notified(tilda_order_id: str) -> None:
         conn.execute(
             "UPDATE tilda_links SET notified = 1 WHERE tilda_order_id = ?", (tilda_order_id,)
         )
+
+
+def list_unnotified_tilda_links(max_age_hours: float = 0.5) -> list[dict]:
+    """
+    Заказы, по которым ещё не отправлено уведомление об оплате в Tilda —
+    используется фоновой проверкой (см. app.main:poll_pending_payments),
+    чтобы не зависеть от того, вернётся ли покупатель в браузере после оплаты.
+    Старше max_age_hours (по умолчанию 30 минут) не возвращаются — такие
+    заказы уже почти наверняка просрочены на стороне банка, нет смысла
+    бесконечно их опрашивать.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM tilda_links WHERE notified = 0 AND created_at != '' ORDER BY created_at"
+        ).fetchall()
+    cutoff = datetime.now(timezone.utc).timestamp() - max_age_hours * 3600
+    result = []
+    for r in rows:
+        try:
+            created_ts = datetime.fromisoformat(r["created_at"]).timestamp()
+        except ValueError:
+            created_ts = 0
+        if created_ts >= cutoff:
+            result.append(dict(r))
+    return result
 
 
 # ---------- Товары (налоговые атрибуты чека по названию товара) ----------
