@@ -115,14 +115,24 @@ def _build_receipt(
 
     tilda_items_list = tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []
 
+    # taxSystemCode передаём банку только если Tilda прислала taxation и он
+    # успешно сопоставился с кодом банка. Если нет — поле вообще не кладём
+    # в receipt, банк сам подставит СНО, зарегистрированную на терминале.
     taxation = tilda_receipt.get("taxation") if isinstance(tilda_receipt, dict) else None
-    mapped_tax_system = TAXATION_TO_TAX_SYSTEM_CODE.get(taxation) if taxation else None
-    tax_system_code = mapped_tax_system if mapped_tax_system is not None else tenant.tax_system_code
-    if taxation and mapped_tax_system is None:
-        logger.warning(
-            "shop_id=%s: система налогообложения %r от Tilda не сопоставлена, использую дефолт точки",
-            shop_id, taxation,
-        )
+    tax_system_code = None
+    if taxation:
+        tax_system_code = TAXATION_TO_TAX_SYSTEM_CODE.get(taxation)
+        if tax_system_code is None:
+            logger.warning(
+                "shop_id=%s: система налогообложения %r от Tilda не распознана — taxSystemCode не отправляем, "
+                "банк подставит сам",
+                shop_id, taxation,
+            )
+        else:
+            logger.warning(
+                "shop_id=%s: Tilda сообщила систему налогообложения %r — отправляем банку код %s",
+                shop_id, taxation, tax_system_code,
+            )
 
     items = []
     for idx, p in enumerate(products):
@@ -211,12 +221,14 @@ def _build_receipt(
         logger.warning("shop_id=%s: нет позиций для чека, receipt не отправляется", shop_id)
         return None
 
-    return {
+    receipt = {
         "items": items,
         "payments": [{"type": 1, "amt": round(amount, 2)}],
         "taxRid": tenant.inn,
-        "taxSystemCode": _fiscal_code(tax_system_code),
     }
+    if tax_system_code is not None:
+        receipt["taxSystemCode"] = _fiscal_code(tax_system_code)
+    return receipt
 
 
 @app.post("/tilda/{shop_id}/checkout")

@@ -5,7 +5,7 @@
 Локально:
     python3 manage_tenants.py add shop1 --bank-login "+79000000001" \
         --bank-password "секрет_банка" --terminal-id 279 \
-        --tilda-login 279 --tilda-secret "секрет_из_формы_tilda" \
+        --tilda-secret "секрет_из_формы_tilda" \
         --notify-url "https://forms.tildaapi.one/payment/custom/psXXXXXXX"
 
     python3 manage_tenants.py list
@@ -29,7 +29,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         bank_login=args.bank_login,
         bank_password=args.bank_password,
         bank_terminal_id=args.terminal_id,
-        tilda_login=args.tilda_login,
+        tilda_login=args.terminal_id,
         tilda_order_secret=args.tilda_secret,
         tilda_notify_url=args.notify_url,
         bank_env=args.bank_env,
@@ -37,7 +37,6 @@ def cmd_add(args: argparse.Namespace) -> None:
         tilda_success_url=args.success_url or "",
         tilda_fail_url=args.fail_url or "",
         inn=args.inn or "",
-        tax_system_code=args.tax_system_code,
         default_tax_rate=args.default_tax_rate,
         default_item_type=args.default_item_type,
         default_calc_mode=args.default_calc_mode,
@@ -129,10 +128,10 @@ def main() -> None:
     p_add.add_argument("shop_id", help="Короткий идентификатор точки, например shop1")
     p_add.add_argument("--bank-login", required=True)
     p_add.add_argument("--bank-password", required=True)
-    p_add.add_argument("--terminal-id", required=True, dest="terminal_id")
+    p_add.add_argument("--terminal-id", required=True, dest="terminal_id",
+                        help="ID терминала банка — используется и как логин для формы Tilda (tilda_login)")
     p_add.add_argument("--owner-type", default="MultiMerchant")
     p_add.add_argument("--bank-env", default="test", choices=["test", "prod"])
-    p_add.add_argument("--tilda-login", required=True)
     p_add.add_argument("--tilda-secret", required=True)
     p_add.add_argument("--notify-url", required=True, dest="notify_url")
     p_add.add_argument("--success-url", dest="success_url", default="")
@@ -143,8 +142,6 @@ def main() -> None:
         default="",
         help="ИНН точки — обязателен, если хотите, чтобы сервер формировал чек (иначе банк применит свои дефолты терминала)",
     )
-    p_add.add_argument("--tax-system-code", dest="tax_system_code", default="2",
-                        help="Код системы налогообложения для банка (1=ОСН, 2=УСН доходы, 3=УСН доходы-расходы, 4=ЕНВД, 5=ЕСН, 6=Патент)")
     p_add.add_argument("--default-tax-rate", dest="default_tax_rate", default="6",
                         help="Ставка НДС по умолчанию для товаров без записи в каталоге (см. tilda-integration/fiscal-receipt.md)")
     p_add.add_argument("--default-item-type", dest="default_item_type", default="1",
