@@ -2,13 +2,14 @@ import json
 import logging
 
 import httpx
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from . import bank_client, db
 from .bank_client import BankApiError
 from .config import get_settings
+from .ffd_mapping import PAYMENT_METHOD_TO_MODE, PAYMENT_OBJECT_TO_TYPE, TAXATION_TO_TAX_SYSTEM_CODE, TAX_TO_TAX_RATE
 from .tilda_signature import compute_signature, verify_signature
 
 logger = logging.getLogger("bank_proxy")
@@ -60,7 +61,7 @@ async def health():
 
 # ---------- Универсальная платёжная система Tilda (по одному URL на точку) ----------
 
-def _fiscal_code(value: str):
+def _fiscal_code(value):
     """Коды банка (taxRate/type/mode) для ОФД Orange Data — целые числа;
     для ОФД БИФИТ Онлайн — строки (VAT_20 и т.п.). Приводим к int, если
     значение чисто числовое, иначе оставляем строкой как есть."""
@@ -70,15 +71,27 @@ def _fiscal_code(value: str):
         return value
 
 
-def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: float) -> dict | None:
+def _build_receipt(
+    tenant: db.Tenant,
+    shop_id: str,
+    products_json: str,
+    tilda_receipt_json: str,
+    amount: float,
+) -> dict | None:
     """
-    Собирает блок receipt для запроса в банк на основе состава корзины,
-    присланного Tilda (name/quantity/price), и налоговых атрибутов из
-    каталога товаров этой точки (app.db.products, сопоставление по названию).
-    Товары, которых нет в каталоге, получают атрибуты по умолчанию точки —
-    в лог пишется предупреждение, чтобы вы могли их доопределить.
-    Если у точки не указан ИНН (tenant.inn) — чек вообще не формируется:
-    банк требует ИНН в каждом запросе с чеком, дефолта для него нет.
+    Собирает блок receipt для запроса в банк.
+
+    Приоритет источника атрибутов (taxRate/type/mode) на каждый товар:
+    1. Ручной каталог точки (app.db.products) — если товар там явно задан,
+       это осознанный override, побеждает всегда.
+    2. Автоматическое поле "Receipt", которое Tilda сама добавляет в запрос,
+       если у товара заполнена вкладка "НДС, ФФД" в карточке (переводим её
+       словарь в коды банка через app.ffd_mapping).
+    3. Атрибуты по умолчанию точки (default_tax_rate и т.п.), если ни то,
+       ни другое не дало результата — с предупреждением в лог.
+
+    Если у точки не указан ИНН — чек вообще не формируется: банк требует
+    ИНН в каждом запросе с чеком, дефолта для него нет.
     """
     if not tenant.inn:
         logger.warning("shop_id=%s: ИНН не задан, чек для банка не формируется", shop_id)
@@ -89,6 +102,26 @@ def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: 
     except (TypeError, ValueError):
         logger.warning("shop_id=%s: не удалось разобрать products от Tilda: %r", shop_id, products_json)
         products = []
+
+    try:
+        tilda_receipt = json.loads(tilda_receipt_json or "{}")
+    except (TypeError, ValueError):
+        tilda_receipt = {}
+
+    tilda_items_by_name = {}
+    for ri in tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []:
+        rname = str(ri.get("name", "")).strip()
+        if rname:
+            tilda_items_by_name[rname] = ri
+
+    taxation = tilda_receipt.get("taxation") if isinstance(tilda_receipt, dict) else None
+    mapped_tax_system = TAXATION_TO_TAX_SYSTEM_CODE.get(taxation) if taxation else None
+    tax_system_code = mapped_tax_system if mapped_tax_system is not None else tenant.tax_system_code
+    if taxation and mapped_tax_system is None:
+        logger.warning(
+            "shop_id=%s: система налогообложения %r от Tilda не сопоставлена, использую дефолт точки",
+            shop_id, taxation,
+        )
 
     items = []
     for p in products:
@@ -108,16 +141,40 @@ def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: 
                 price = 0.0
 
         catalog_entry = db.get_product(shop_id, name) if name else None
-        if catalog_entry is None:
-            logger.warning(
-                "shop_id=%s: товар %r не найден в каталоге, использую атрибуты по умолчанию точки",
-                shop_id, name,
-            )
-            tax_rate, item_type, calc_mode = tenant.default_tax_rate, tenant.default_item_type, tenant.default_calc_mode
-        else:
+        if catalog_entry is not None:
             tax_rate = catalog_entry["tax_rate"]
             item_type = catalog_entry["item_type"]
             calc_mode = catalog_entry["calc_mode"]
+        else:
+            tilda_item = tilda_items_by_name.get(name)
+            if tilda_item is not None:
+                mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
+                mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
+                mapped_mode = PAYMENT_METHOD_TO_MODE.get(tilda_item.get("payment_method"))
+                if mapped_tax is None:
+                    logger.warning(
+                        "shop_id=%s: товар %r — ставка НДС %r от Tilda не сопоставлена с кодом банка, использую дефолт точки",
+                        shop_id, name, tilda_item.get("tax"),
+                    )
+                if mapped_type is None:
+                    logger.warning(
+                        "shop_id=%s: товар %r — предмет расчёта %r от Tilda не сопоставлен, использую дефолт точки",
+                        shop_id, name, tilda_item.get("payment_object"),
+                    )
+                if mapped_mode is None:
+                    logger.warning(
+                        "shop_id=%s: товар %r — способ расчёта %r от Tilda не сопоставлен, использую дефолт точки",
+                        shop_id, name, tilda_item.get("payment_method"),
+                    )
+                tax_rate = mapped_tax if mapped_tax is not None else tenant.default_tax_rate
+                item_type = mapped_type if mapped_type is not None else tenant.default_item_type
+                calc_mode = mapped_mode if mapped_mode is not None else tenant.default_calc_mode
+            else:
+                logger.warning(
+                    "shop_id=%s: товар %r — нет ни в каталоге, ни в Receipt от Tilda, использую дефолты точки",
+                    shop_id, name,
+                )
+                tax_rate, item_type, calc_mode = tenant.default_tax_rate, tenant.default_item_type, tenant.default_calc_mode
 
         items.append(
             {
@@ -140,20 +197,20 @@ def _build_receipt(tenant: db.Tenant, shop_id: str, products_json: str, amount: 
         "items": items,
         "payments": [{"type": 1, "amt": round(amount, 2)}],
         "taxRid": tenant.inn,
-        "taxSystemCode": _fiscal_code(tenant.tax_system_code),
+        "taxSystemCode": _fiscal_code(tax_system_code),
     }
 
 
 @app.post("/tilda/{shop_id}/checkout")
 async def tilda_checkout(
     shop_id: str,
-    request: Request,
     login: str = Form(...),
     order_id: str = Form(...),
     order_amount: str = Form(...),
     signature: str = Form(...),
     client_email: str = Form(""),
     products: str = Form("[]"),
+    tilda_receipt: str = Form("{}", alias="Receipt"),
 ):
     """
     Сюда Tilda перенаправляет браузер покупателя (POST) сразу после
@@ -161,12 +218,6 @@ async def tilda_checkout(
     именно этот адрес указывается в поле "API URL" при настройке
     Универсальной платёжной системы у данного клиента.
     """
-    # ВРЕМЕННАЯ ДИАГНОСТИКА: логируем вообще всё, что прислала Tilda —
-    # чтобы увидеть, не появилось ли новое поле с НДС/ФФД по товару
-    # после включения вкладки "НДС, ФФД" в карточках товаров.
-    raw_form = await request.form()
-    logger.warning("shop_id=%s: RAW TILDA FORM = %s", shop_id, dict(raw_form))
-
     tenant = _get_tenant_or_404(shop_id)
 
     if not verify_signature(tenant.tilda_order_secret, login, order_id, order_amount, signature):
@@ -193,7 +244,7 @@ async def tilda_checkout(
     if client_email:
         order_payload["srcEmail"] = client_email
 
-    receipt = _build_receipt(tenant, shop_id, products, amount)
+    receipt = _build_receipt(tenant, shop_id, products, tilda_receipt, amount)
     if receipt is not None:
         order_payload["receipt"] = receipt
 
