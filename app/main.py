@@ -113,11 +113,7 @@ def _build_receipt(
     # ВРЕМЕННАЯ ДИАГНОСТИКА: что реально прислала Tilda в Receipt на этот раз
     logger.warning("shop_id=%s: RAW Receipt от Tilda = %r", shop_id, tilda_receipt_json)
 
-    tilda_items_by_name = {}
-    for ri in tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []:
-        rname = str(ri.get("name", "")).strip()
-        if rname:
-            tilda_items_by_name[rname] = ri
+    tilda_items_list = tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []
 
     taxation = tilda_receipt.get("taxation") if isinstance(tilda_receipt, dict) else None
     mapped_tax_system = TAXATION_TO_TAX_SYSTEM_CODE.get(taxation) if taxation else None
@@ -129,7 +125,7 @@ def _build_receipt(
         )
 
     items = []
-    for p in products:
+    for idx, p in enumerate(products):
         name = str(p.get("name", "")).strip()
         try:
             quantity = float(p.get("quantity", 1) or 1)
@@ -155,8 +151,21 @@ def _build_receipt(
             item_type = catalog_entry["item_type"]
             calc_mode = catalog_entry["calc_mode"]
         else:
-            tilda_item = tilda_items_by_name.get(name)
+            tilda_item = tilda_items_list[idx] if idx < len(tilda_items_list) else None
             if tilda_item is not None:
+                tilda_name = str(tilda_item.get("name", "")).strip()
+                if tilda_name and name and not tilda_name.startswith(name):
+                    # Название в Receipt обычно совпадает с products, но для
+                    # товаров с вариантами (цвет/размер) Tilda дописывает к
+                    # нему опции ("Apples, Color=Green apples") — это ожидаемо
+                    # и не повод считать сопоставление ошибочным. Предупреждаем
+                    # только если названия разошлись сильнее, чем просто
+                    # добавленный вариант, — вдруг реально другой порядок.
+                    logger.warning(
+                        "shop_id=%s: позиция %d — название в Receipt (%r) заметно отличается "
+                        "от названия в products (%r), проверьте порядок товаров",
+                        shop_id, idx, tilda_name, name,
+                    )
                 mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
                 mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
                 mapped_mode = PAYMENT_METHOD_TO_MODE.get(tilda_item.get("payment_method"))
