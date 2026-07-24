@@ -40,6 +40,10 @@ class Tenant:
     # Раньше был захардкожен как "56" на все точки — клиент (Tilda) его не
     # передаёт вообще, поэтому это настройка конкретной точки, выданная банком.
     type_rid: str = "56"
+    # Какой ОФД подключён к терминалу точки — влияет на формат кода ставки
+    # НДС (taxRate): Orange Data — числа, БИФИТ Онлайн — строковые теги.
+    # См. app/ffd_mapping.py:TAX_TO_TAX_RATE_BY_OFD.
+    ofd_provider: str = "orange_data"
     # Информационные поля — не участвуют в запросах к банку, только для
     # удобства идентификации точки в админ-панели и CLI.
     merchant_name: str = ""
@@ -93,6 +97,7 @@ def init_db() -> None:
                 merchant_name TEXT NOT NULL DEFAULT '',
                 terminal_number TEXT NOT NULL DEFAULT '',
                 type_rid TEXT NOT NULL DEFAULT '56',
+                ofd_provider TEXT NOT NULL DEFAULT 'orange_data',
                 created_at TEXT NOT NULL
             )
             """
@@ -122,6 +127,7 @@ def init_db() -> None:
             ("merchant_name", ""),
             ("terminal_number", ""),
             ("type_rid", "56"),
+            ("ofd_provider", "orange_data"),
         ):
             try:
                 conn.execute(f"ALTER TABLE tenants ADD COLUMN {col} TEXT NOT NULL DEFAULT '{default}'")
@@ -184,6 +190,7 @@ def add_tenant(
     merchant_name: str = "",
     terminal_number: str = "",
     type_rid: str = "56",
+    ofd_provider: str = "orange_data",
 ) -> None:
     with _conn() as conn:
         conn.execute(
@@ -192,8 +199,8 @@ def add_tenant(
                 url_tilda, bank_env, bank_owner_type, tsp_login, tsp_password_enc,
                 bank_terminal_id, tilda_login, tilda_order_secret_enc, tilda_notify_url,
                 tilda_success_url, tilda_fail_url, inn, merchant_name, terminal_number,
-                type_rid, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                type_rid, ofd_provider, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url_tilda) DO UPDATE SET
                 bank_env=excluded.bank_env,
                 bank_owner_type=excluded.bank_owner_type,
@@ -208,7 +215,8 @@ def add_tenant(
                 inn=excluded.inn,
                 merchant_name=excluded.merchant_name,
                 terminal_number=excluded.terminal_number,
-                type_rid=excluded.type_rid
+                type_rid=excluded.type_rid,
+                ofd_provider=excluded.ofd_provider
             """,
             (
                 url_tilda,
@@ -226,6 +234,7 @@ def add_tenant(
                 merchant_name,
                 terminal_number,
                 type_rid,
+                ofd_provider,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -252,6 +261,7 @@ def get_tenant(url_tilda: str) -> Tenant | None:
         merchant_name=row["merchant_name"] or "",
         terminal_number=row["terminal_number"] or "",
         type_rid=row["type_rid"] or "56",
+        ofd_provider=row["ofd_provider"] or "orange_data",
     )
 
 

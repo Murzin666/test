@@ -40,6 +40,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         merchant_name=args.merchant_name or "",
         terminal_number=args.terminal_number or "",
         type_rid=args.type_rid or "56",
+        ofd_provider=args.ofd_provider,
     )
     print(f"Точка '{args.url_tilda}' сохранена.")
     print(f"API URL для формы Tilda: {args.public_base_url}/tilda/{args.url_tilda}/checkout")
@@ -81,6 +82,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"merchant_name:       {tenant.merchant_name or '(не задано)'}")
     print(f"terminal_number:     {tenant.terminal_number or '(не задан)'}")
     print(f"type_rid:            {tenant.type_rid}")
+    print(f"ofd_provider:        {tenant.ofd_provider}")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -129,6 +131,13 @@ def main() -> None:
         default="56",
         help="Тип заказа (typeRid) — выдаёт банк, определяет способ оплаты/тип операции, "
              "так как Tilda его не передаёт (по умолчанию 56)",
+    )
+    p_add.add_argument(
+        "--ofd-provider",
+        dest="ofd_provider",
+        default="orange_data",
+        choices=["orange_data", "bifit"],
+        help="Какой ОФД подключён к терминалу — влияет на формат кода ставки НДС в чеке (по умолчанию orange_data)",
     )
     p_add.add_argument(
         "--public-base-url",

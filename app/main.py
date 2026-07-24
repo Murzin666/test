@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from . import admin, bank_client, db
 from .bank_client import BankApiError
 from .config import get_settings
-from .ffd_mapping import PAYMENT_METHOD_TO_MODE, PAYMENT_OBJECT_TO_TYPE, TAXATION_TO_TAX_SYSTEM_CODE, TAX_TO_TAX_RATE
+from .ffd_mapping import PAYMENT_METHOD_TO_MODE, PAYMENT_OBJECT_TO_TYPE, TAXATION_TO_TAX_SYSTEM_CODE, TAX_TO_TAX_RATE_BY_OFD
 from .tilda_signature import compute_signature, verify_signature
 
 logger = logging.getLogger("bank_proxy")
@@ -166,7 +166,8 @@ def _build_receipt(
                     "от названия в products (%r), проверьте порядок товаров",
                     url_tilda, idx, tilda_name, name,
                 )
-            mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
+            tax_rate_table = TAX_TO_TAX_RATE_BY_OFD.get(tenant.ofd_provider, TAX_TO_TAX_RATE_BY_OFD["orange_data"])
+            mapped_tax = tax_rate_table.get(tilda_item.get("tax"))
             mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
             mapped_mode = PAYMENT_METHOD_TO_MODE.get(tilda_item.get("payment_method"))
 
