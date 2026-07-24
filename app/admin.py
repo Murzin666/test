@@ -32,8 +32,8 @@ class TenantIn(BaseModel):
     bank_env: str = "test"
     tilda_secret: str = ""
     tilda_notify_url: str
-    tilda_success_url: str = ""
-    tilda_fail_url: str = ""
+    tilda_success_url: str
+    tilda_fail_url: str
     inn: str = ""
 
 
@@ -122,19 +122,20 @@ ADMIN_HTML = """<!DOCTYPE html>
 <title>Торговые точки — админ-панель</title>
 <style>
   :root{
-    --bg:#F3F6EE; --surface:#FFFFFF; --ink:#17261B; --ink-dim:#4B5A47; --ink-faint:#8B9686;
-    --line:#DCE4D1; --brand:#6FAE23; --brand-dark:#4C8016; --coral:#D2454E; --coral-dim:#FBE8E7;
+    --bg:#FFFFFF; --surface:#FFFFFF; --ink:#141414; --ink-dim:#6B7280; --ink-faint:#ADB5BD;
+    --line:#E3E5E8; --brand:#5CAA3C; --brand-dark:#478A2E; --coral:#D2454E; --coral-dim:#FBE8E7;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Segoe UI,Arial,sans-serif;}
   .wrap{max-width:880px;margin:0 auto;padding:32px 20px 80px;}
-  h1{font-size:22px;margin:0 0 4px;}
+  h1{font-size:26px;font-weight:700;margin:0 0 4px;color:var(--ink);}
   .sub{color:var(--ink-dim);font-size:13.5px;margin-bottom:24px;}
   #loginBox{max-width:380px;margin:80px auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;}
-  #loginBox h2{font-size:16px;margin-top:0;}
-  input, select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;background:#fff;color:var(--ink);}
-  label{display:block;font-size:12.5px;color:var(--ink-dim);margin:10px 0 4px;}
-  button{cursor:pointer;border:none;border-radius:7px;padding:9px 16px;font-size:13.5px;font-weight:600;}
+  #loginBox h2{font-size:20px;font-weight:700;margin-top:0;}
+  input, select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;background:#fff;color:var(--ink);}
+  input::placeholder{color:var(--ink-faint);}
+  label{display:block;font-size:13px;font-weight:600;color:var(--brand);margin:10px 0 5px;}
+  button{cursor:pointer;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;}
   .btn-primary{background:var(--brand);color:#fff;}
   .btn-primary:hover{background:var(--brand-dark);}
   .btn-ghost{background:transparent;color:var(--ink-dim);border:1px solid var(--line);}
@@ -145,19 +146,24 @@ ADMIN_HTML = """<!DOCTYPE html>
   tr:last-child td{border-bottom:none;}
   .row-actions{display:flex;gap:6px;}
   .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-  .modal-bg{position:fixed;inset:0;background:rgba(23,38,27,.35);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;}
-  .modal{background:var(--surface);border-radius:12px;padding:24px;max-width:520px;width:100%;}
-  .modal h2{margin-top:0;font-size:17px;}
+  .modal-bg{position:fixed;inset:0;background:rgba(20,20,20,.35);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;}
+  .modal{background:var(--surface);border-radius:12px;padding:24px;max-width:520px;width:100%;box-shadow:0 12px 32px rgba(0,0,0,.12);}
+  .modal h2{margin-top:0;font-size:19px;font-weight:700;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
   .hint{font-size:11.5px;color:var(--ink-faint);margin-top:3px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
-  .checkout-url{font-family:monospace;font-size:11.5px;background:#F3F6EE;border:1px dashed var(--line);padding:8px 10px;border-radius:6px;word-break:break-all;margin-top:6px;}
+  .checkout-url{font-family:monospace;font-size:11.5px;background:#F7F8F9;border:1px dashed var(--line);padding:8px 10px;border-radius:6px;word-break:break-all;margin-top:6px;}
   .hidden{display:none !important;}
   .error{color:var(--coral);font-size:12.5px;margin-top:8px;}
+  .input-error{border-color:var(--coral) !important;background:var(--coral-dim);}
   .empty{padding:30px;text-align:center;color:var(--ink-faint);font-size:13.5px;}
+  .brand-mark{position:fixed;top:20px;left:24px;font-weight:800;color:var(--brand);font-size:14px;letter-spacing:.01em;line-height:1.15;}
 </style>
 </head>
+
 <body>
+
+<div class="brand-mark">БАНК<br>ЦЕНТР-ИНВЕСТ</div>
 
 <div id="loginBox">
   <h2>Вход в админ-панель</h2>
@@ -181,12 +187,12 @@ ADMIN_HTML = """<!DOCTYPE html>
   <div class="modal">
     <h2 id="modalTitle">Новая точка</h2>
     <label>shop_id</label>
-    <input id="f_shop_id" placeholder="shop1">
+    <input id="f_shop_id" placeholder="shop2">
     <div class="hint">Короткий идентификатор — часть API URL, после создания не меняется.</div>
 
     <div class="grid2">
       <div><label>Логин банка</label><input id="f_bank_login" placeholder="+79000000001"></div>
-      <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="123"></div>
+      <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="279"></div>
     </div>
     <label>Пароль банка</label>
     <input id="f_bank_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
@@ -217,7 +223,7 @@ ADMIN_HTML = """<!DOCTYPE html>
       <div><label>URL отказа</label><input id="f_tilda_fail_url" placeholder="https://.../payment-failed"></div>
     </div>
     <label>ИНН</label>
-    <input id="f_inn" placeholder="1234567890">
+    <input id="f_inn" placeholder="7727401209">
 
     <div class="error" id="formError"></div>
     <div class="modal-actions">
@@ -302,6 +308,7 @@ function renderTable(tenants) {
 async function openForm(shopId) {
   editingShopId = shopId;
   document.getElementById('formError').textContent = '';
+  clearFieldErrors();
   document.getElementById('modalTitle').textContent = shopId ? `Изменить: ${shopId}` : 'Новая точка';
   const ids = ['bank_login','bank_password','bank_terminal_id','bank_owner_type','bank_env',
                'tilda_secret','tilda_notify_url','tilda_success_url','tilda_fail_url','inn'];
@@ -342,12 +349,58 @@ function closeForm() {
   document.getElementById('modalBg').classList.add('hidden');
 }
 
+const REQUIRED_FIELD_IDS = ['shop_id', 'bank_login', 'bank_terminal_id', 'bank_owner_type',
+                            'bank_env', 'tilda_notify_url', 'tilda_success_url', 'tilda_fail_url', 'inn'];
+// bank_password и tilda_secret обязательны только при создании новой точки
+// (при редактировании пустое значение означает "не менять") — единственное
+// оставшееся исключение из общего правила "все поля обязательны".
+
+function clearFieldErrors() {
+  [...REQUIRED_FIELD_IDS, 'bank_password', 'tilda_secret'].forEach(id => {
+    document.getElementById('f_' + id).classList.remove('input-error');
+  });
+}
+
+function validateForm() {
+  clearFieldErrors();
+  let firstInvalid = null;
+  const missing = [];
+
+  REQUIRED_FIELD_IDS.forEach(id => {
+    const el = document.getElementById('f_' + id);
+    if (!el.value.trim()) {
+      el.classList.add('input-error');
+      missing.push(id);
+      if (!firstInvalid) firstInvalid = el;
+    }
+  });
+
+  if (!editingShopId) {
+    ['bank_password', 'tilda_secret'].forEach(id => {
+      const el = document.getElementById('f_' + id);
+      if (!el.value.trim()) {
+        el.classList.add('input-error');
+        missing.push(id);
+        if (!firstInvalid) firstInvalid = el;
+      }
+    });
+  }
+
+  if (missing.length) {
+    if (firstInvalid) firstInvalid.focus();
+    return 'Заполните обязательные поля: ' + missing.join(', ');
+  }
+  return null;
+}
+
 async function saveTenant() {
-  const shopId = document.getElementById('f_shop_id').value.trim();
-  if (!shopId) {
-    document.getElementById('formError').textContent = 'Укажите shop_id.';
+  const validationError = validateForm();
+  if (validationError) {
+    document.getElementById('formError').textContent = validationError;
     return;
   }
+
+  const shopId = document.getElementById('f_shop_id').value.trim();
   const body = {
     bank_login: document.getElementById('f_bank_login').value.trim(),
     bank_password: document.getElementById('f_bank_password').value,
@@ -378,6 +431,11 @@ async function removeTenant(shopId) {
     alert('Ошибка: ' + e.message);
   }
 }
+
+document.querySelectorAll('#modalBg input, #modalBg select').forEach(el => {
+  el.addEventListener('input', () => el.classList.remove('input-error'));
+  el.addEventListener('change', () => el.classList.remove('input-error'));
+});
 
 if (adminKey) { boot(); }
 </script>
