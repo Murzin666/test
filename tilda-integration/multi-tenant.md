@@ -75,12 +75,14 @@ railway run python manage_tenants.py add shop1 \
   --bank-login "+79040001313" \
   --bank-password "секрет_банка" \
   --terminal-id 279 \
-  --tilda-login 279 \
   --tilda-secret "секрет_из_формы_tilda_для_этой_точки" \
   --notify-url "https://forms.tildaapi.one/payment/custom/psXXXXXXX" \
   --success-url "https://shop1.tilda.ws/thanks" \
   --fail-url "https://shop1.tilda.ws/payment-failed"
 ```
+
+(`--terminal-id` используется и как логин для формы Tilda — отдельный
+`--tilda-login` больше не нужен, эти значения на практике всегда совпадают.)
 
 Команда выведет готовый **API URL**, который нужно вписать в форму
 Универсальной платёжной системы именно этой точки на Tilda.

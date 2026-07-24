@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
-from . import bank_client, db
+from . import admin, bank_client, db
 from .bank_client import BankApiError
 from .config import get_settings
 from .ffd_mapping import PAYMENT_METHOD_TO_MODE, PAYMENT_OBJECT_TO_TYPE, TAXATION_TO_TAX_SYSTEM_CODE, TAX_TO_TAX_RATE
@@ -18,6 +18,8 @@ logger = logging.getLogger("bank_proxy")
 settings = get_settings()
 
 app = FastAPI(title="Эквайринг Центр-инвест — сервер-посредник для Tilda (мультитенантный)")
+
+app.include_router(admin.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -83,14 +85,14 @@ def _build_receipt(
     """
     Собирает блок receipt для запроса в банк.
 
-    Приоритет источника атрибутов (taxRate/type/mode) на каждый товар:
-    1. Ручной каталог точки (app.db.products) — если товар там явно задан,
-       это осознанный override, побеждает всегда.
-    2. Автоматическое поле "Receipt", которое Tilda сама добавляет в запрос,
-       если у товара заполнена вкладка "НДС, ФФД" в карточке (переводим её
-       словарь в коды банка через app.ffd_mapping).
-    3. Атрибуты по умолчанию точки (default_tax_rate и т.п.), если ни то,
-       ни другое не дало результата — с предупреждением в лог.
+    Источник атрибутов (taxRate/type/mode) на каждый товар — автоматическое
+    поле "Receipt", которое Tilda сама добавляет в запрос, если у товара
+    заполнена вкладка "НДС, ФФД" в карточке (переводим её словарь в коды
+    банка через app.ffd_mapping). Если для конкретного товара или атрибута
+    данных нет или их не удалось сопоставить — это поле просто НЕ включается
+    в позицию чека: мы не подставляем своё значение вместо того, что
+    предполагал продавец, банк применит свой собственный дефолт для
+    терминала (как было до появления этой логики).
 
     Если у точки не указан ИНН — чек вообще не формируется: банк требует
     ИНН в каждом запросе с чеком, дефолта для него нет.
@@ -109,9 +111,6 @@ def _build_receipt(
         tilda_receipt = json.loads(tilda_receipt_json or "{}")
     except (TypeError, ValueError):
         tilda_receipt = {}
-
-    # ВРЕМЕННАЯ ДИАГНОСТИКА: что реально прислала Tilda в Receipt на этот раз
-    logger.warning("shop_id=%s: RAW Receipt от Tilda = %r", shop_id, tilda_receipt_json)
 
     tilda_items_list = tilda_receipt.get("items", []) if isinstance(tilda_receipt, dict) else []
 
@@ -151,69 +150,62 @@ def _build_receipt(
             except (TypeError, ValueError, ZeroDivisionError):
                 price = 0.0
 
-        catalog_entry = db.get_product(shop_id, name) if name else None
-        if catalog_entry is not None:
-            logger.warning(
-                "shop_id=%s: товар %r — использую РУЧНОЙ КАТАЛОГ (taxRate=%s type=%s mode=%s), Tilda-данные проигнорированы",
-                shop_id, name, catalog_entry["tax_rate"], catalog_entry["item_type"], catalog_entry["calc_mode"],
-            )
-            tax_rate = catalog_entry["tax_rate"]
-            item_type = catalog_entry["item_type"]
-            calc_mode = catalog_entry["calc_mode"]
-        else:
-            tilda_item = tilda_items_list[idx] if idx < len(tilda_items_list) else None
-            if tilda_item is not None:
-                tilda_name = str(tilda_item.get("name", "")).strip()
-                if tilda_name and name and not tilda_name.startswith(name):
-                    # Название в Receipt обычно совпадает с products, но для
-                    # товаров с вариантами (цвет/размер) Tilda дописывает к
-                    # нему опции ("Apples, Color=Green apples") — это ожидаемо
-                    # и не повод считать сопоставление ошибочным. Предупреждаем
-                    # только если названия разошлись сильнее, чем просто
-                    # добавленный вариант, — вдруг реально другой порядок.
-                    logger.warning(
-                        "shop_id=%s: позиция %d — название в Receipt (%r) заметно отличается "
-                        "от названия в products (%r), проверьте порядок товаров",
-                        shop_id, idx, tilda_name, name,
-                    )
-                mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
-                mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
-                mapped_mode = PAYMENT_METHOD_TO_MODE.get(tilda_item.get("payment_method"))
-                if mapped_tax is None:
-                    logger.warning(
-                        "shop_id=%s: товар %r — ставка НДС %r от Tilda не сопоставлена с кодом банка, использую дефолт точки",
-                        shop_id, name, tilda_item.get("tax"),
-                    )
-                if mapped_type is None:
-                    logger.warning(
-                        "shop_id=%s: товар %r — предмет расчёта %r от Tilda не сопоставлен, использую дефолт точки",
-                        shop_id, name, tilda_item.get("payment_object"),
-                    )
-                if mapped_mode is None:
-                    logger.warning(
-                        "shop_id=%s: товар %r — способ расчёта %r от Tilda не сопоставлен, использую дефолт точки",
-                        shop_id, name, tilda_item.get("payment_method"),
-                    )
-                tax_rate = mapped_tax if mapped_tax is not None else tenant.default_tax_rate
-                item_type = mapped_type if mapped_type is not None else tenant.default_item_type
-                calc_mode = mapped_mode if mapped_mode is not None else tenant.default_calc_mode
-            else:
+        tilda_item = tilda_items_list[idx] if idx < len(tilda_items_list) else None
+        mapped_tax = mapped_type = mapped_mode = None
+        if tilda_item is not None:
+            tilda_name = str(tilda_item.get("name", "")).strip()
+            if tilda_name and name and not tilda_name.startswith(name):
+                # Название в Receipt обычно совпадает с products, но для
+                # товаров с вариантами (цвет/размер) Tilda дописывает к
+                # нему опции ("Apples, Color=Green apples") — это ожидаемо
+                # и не повод считать сопоставление ошибочным. Предупреждаем
+                # только если названия разошлись сильнее, чем просто
+                # добавленный вариант, — вдруг реально другой порядок.
                 logger.warning(
-                    "shop_id=%s: товар %r — нет ни в каталоге, ни в Receipt от Tilda, использую дефолты точки",
-                    shop_id, name,
+                    "shop_id=%s: позиция %d — название в Receipt (%r) заметно отличается "
+                    "от названия в products (%r), проверьте порядок товаров",
+                    shop_id, idx, tilda_name, name,
                 )
-                tax_rate, item_type, calc_mode = tenant.default_tax_rate, tenant.default_item_type, tenant.default_calc_mode
+            mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
+            mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
+            mapped_mode = PAYMENT_METHOD_TO_MODE.get(tilda_item.get("payment_method"))
 
-        items.append(
-            {
-                "desc": name or "Товар",
-                "quantity": quantity,
-                "price": round(price, 2),
-                "taxRate": _fiscal_code(tax_rate),
-                "type": _fiscal_code(item_type),
-                "mode": _fiscal_code(calc_mode),
-            }
-        )
+        # Если что-то не удалось определить из данных Tilda — НЕ подставляем
+        # своё значение и не отправляем это поле банку вообще. Так честнее:
+        # банк применит свой собственный дефолт, зарегистрированный на
+        # терминале, а не наше предположение, которое может не совпасть с
+        # тем, что реально имел в виду продавец.
+        if mapped_tax is None:
+            logger.warning(
+                "shop_id=%s: товар %r — ставка НДС не определена из данных Tilda, "
+                "поле taxRate не отправляется, банк применит свой дефолт терминала",
+                shop_id, name,
+            )
+        if mapped_type is None:
+            logger.warning(
+                "shop_id=%s: товар %r — предмет расчёта не определён из данных Tilda, "
+                "поле type не отправляется, банк применит свой дефолт терминала",
+                shop_id, name,
+            )
+        if mapped_mode is None:
+            logger.warning(
+                "shop_id=%s: товар %r — способ расчёта не определён из данных Tilda, "
+                "поле mode не отправляется, банк применит свой дефолт терминала",
+                shop_id, name,
+            )
+
+        item = {
+            "desc": name or "Товар",
+            "quantity": quantity,
+            "price": round(price, 2),
+        }
+        if mapped_tax is not None:
+            item["taxRate"] = _fiscal_code(mapped_tax)
+        if mapped_type is not None:
+            item["type"] = _fiscal_code(mapped_type)
+        if mapped_mode is not None:
+            item["mode"] = _fiscal_code(mapped_mode)
+        items.append(item)
 
     if not items:
         # Состав корзины не пришёл или не распарсился — не отправляем банку
@@ -277,8 +269,6 @@ async def tilda_checkout(
     receipt = _build_receipt(tenant, shop_id, products, tilda_receipt, amount)
     if receipt is not None:
         order_payload["receipt"] = receipt
-    # ВРЕМЕННАЯ ДИАГНОСТИКА: смотрим, что именно уходит в банк
-    logger.warning("shop_id=%s: order_payload ОТПРАВЛЯЕМ В БАНК = %s", shop_id, json.dumps(order_payload, ensure_ascii=False))
 
     order = await bank_client.create_order(tenant, session_id, order_payload)
     bank_order_id = order["order"]["id"]
