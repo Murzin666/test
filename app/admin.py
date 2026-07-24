@@ -230,7 +230,7 @@ ADMIN_HTML = """<!DOCTYPE html>
 
     <div class="grid2">
       <div><label>Логин банка</label><input id="f_bank_login" placeholder="+79000000001"></div>
-      <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="279"></div>
+      <div><label>Терминал ID TXPG</label><input id="f_bank_terminal_id" placeholder="279"></div>
     </div>
     <div class="grid2">
       <div><label>Номер терминала</label><input id="f_terminal_number" placeholder="T-00123"></div>
@@ -395,9 +395,10 @@ function renderTable() {
 
   const rows = pageItems.map(t => `
     <tr>
+      <td><b>${t.terminal_number || '—'}</b></td>
       <td><b>${t.shop_id}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url">${t.checkout_url}</div></td>
       <td>${t.bank_env}</td>
-      <td>${t.bank_login}<br><span style="color:var(--ink-faint)">терминал ${t.bank_terminal_id} · № ${t.terminal_number || '—'}</span></td>
+      <td>${t.bank_login}<br><span style="color:var(--ink-faint)">терминал ID TXPG ${t.bank_terminal_id}</span></td>
       <td>${t.inn || '<span style="color:var(--coral)">нет ИНН</span>'}</td>
       <td class="row-actions">
         <button class="btn-ghost" onclick="openForm('${t.shop_id}')">Изменить</button>
@@ -406,7 +407,7 @@ function renderTable() {
     </tr>
   `).join('');
   wrap.innerHTML = `<table>
-    <tr><th>Точка</th><th>Среда</th><th>Банк</th><th>ИНН</th><th></th></tr>
+    <tr><th>Номер терминала</th><th>Точка</th><th>Среда</th><th>Банк</th><th>ИНН</th><th></th></tr>
     ${rows}
   </table>`;
 
