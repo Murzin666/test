@@ -495,7 +495,12 @@ document.querySelectorAll('#modalBg input, #modalBg select').forEach(el => {
   el.addEventListener('change', () => el.classList.remove('input-error'));
 });
 
-if (adminKey) { boot(); }
+if (adminKey) {
+  // Прячем форму входа сразу, не дожидаясь ответа сервера — иначе она
+  // на мгновение мелькает, пока идёт запрос /admin/api/tenants.
+  document.getElementById('loginBox').classList.add('hidden');
+  boot();
+}
 </script>
 </body>
 </html>
