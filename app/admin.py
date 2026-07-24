@@ -181,12 +181,12 @@ ADMIN_HTML = """<!DOCTYPE html>
   <div class="modal">
     <h2 id="modalTitle">Новая точка</h2>
     <label>shop_id</label>
-    <input id="f_shop_id" placeholder="shop2">
+    <input id="f_shop_id" placeholder="shop1">
     <div class="hint">Короткий идентификатор — часть API URL, после создания не меняется.</div>
 
     <div class="grid2">
       <div><label>Логин банка</label><input id="f_bank_login" placeholder="+79000000001"></div>
-      <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="279"></div>
+      <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="123"></div>
     </div>
     <label>Пароль банка</label>
     <input id="f_bank_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
@@ -217,7 +217,7 @@ ADMIN_HTML = """<!DOCTYPE html>
       <div><label>URL отказа</label><input id="f_tilda_fail_url" placeholder="https://.../payment-failed"></div>
     </div>
     <label>ИНН</label>
-    <input id="f_inn" placeholder="7727401209">
+    <input id="f_inn" placeholder="1234567890">
 
     <div class="error" id="formError"></div>
     <div class="modal-actions">
@@ -308,6 +308,15 @@ async function openForm(shopId) {
   ids.forEach(id => document.getElementById('f_' + id).value = '');
   document.getElementById('f_shop_id').value = '';
   document.getElementById('f_shop_id').disabled = false;
+
+  // Плейсхолдеры и выпадающие списки — сбрасываем к дефолтам новой точки.
+  // Иначе при повторном открытии формы после редактирования другой точки
+  // остаются старые подсказки/значения (поля переиспользуются между
+  // созданием и редактированием).
+  document.getElementById('f_bank_password').placeholder = 'обязательно';
+  document.getElementById('f_tilda_secret').placeholder = 'обязательно';
+  document.getElementById('f_bank_owner_type').value = 'MultiMerchant';
+  document.getElementById('f_bank_env').value = 'test';
 
   if (shopId) {
     const t = await api('/admin/api/tenants/' + encodeURIComponent(shopId));
