@@ -256,11 +256,13 @@ async def tilda_checkout(
     )
     session_id = session["sessionId"]
 
+    order_note = f"Оплата заказа {order_id}"
     order_payload = {
         "typeRid": tenant.type_rid,
         "amount": f"{amount:.2f}",
         "currency": "RUB",
-        "description": f"Заказ Tilda #{order_id}",
+        "description": order_note,
+        "remittanceMessage": order_note,
         "language": "ru",
         "hppRedirectUrl": f"{settings.public_base_url}/tilda/{url_tilda}/return?ref={order_id}",
     }
