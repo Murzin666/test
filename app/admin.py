@@ -146,6 +146,12 @@ ADMIN_HTML = """<!DOCTYPE html>
   #loginBox{max-width:380px;margin:80px auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;}
   #loginBox h2{font-size:20px;font-weight:700;margin-top:0;}
   input, select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;background:#fff;color:var(--ink);}
+  select{
+    appearance:none;-webkit-appearance:none;-moz-appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat:no-repeat;background-position:right 12px center;padding-right:34px;cursor:pointer;
+  }
+  select:focus{outline:none;border-color:var(--brand);}
   input::placeholder{color:var(--ink-faint);}
   label{display:block;font-size:13px;font-weight:600;color:var(--brand);margin:10px 0 5px;}
   button{cursor:pointer;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;line-height:1.1;}
