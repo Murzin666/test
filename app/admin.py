@@ -155,6 +155,16 @@ ADMIN_HTML = """<!DOCTYPE html>
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
   .checkout-url{font-family:monospace;font-size:11.5px;background:#F7F8F9;border:1px dashed var(--line);padding:8px 10px;border-radius:6px;word-break:break-all;margin-top:6px;}
   .hidden{display:none !important;}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #loader{position:fixed;inset:0;background:rgba(255,255,255,.7);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .inline-spinner{display:flex;justify-content:center;padding:40px 0;}
+  .search-wrap{position:relative;max-width:260px;width:100%;}
+  .search-wrap input{padding-right:32px;}
+  .search-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--ink-faint);font-size:16px;line-height:1;padding:4px 6px;cursor:pointer;border-radius:5px;}
+  .search-clear:hover{color:var(--ink-dim);background:var(--bg);}
+  .modal.modal-sm{max-width:380px;}
+  .modal p{font-size:13.5px;color:var(--ink-dim);line-height:1.5;}
   .error{color:var(--coral);font-size:12.5px;margin-top:8px;}
   .input-error{border-color:var(--coral) !important;background:var(--coral-dim);}
   .empty{padding:30px;text-align:center;color:var(--ink-faint);font-size:13.5px;}
@@ -186,7 +196,10 @@ ADMIN_HTML = """<!DOCTYPE html>
   <h1>Торговые точки</h1>
   <div class="sub">Управление точками, подключёнными к серверу-посреднику.</div>
   <div class="toolbar">
-    <input id="searchInn" placeholder="Поиск по ИНН…" style="max-width:260px" oninput="onSearchChange()">
+    <div class="search-wrap">
+      <input id="searchInn" placeholder="Поиск по ИНН…" oninput="onSearchChange()">
+      <button class="search-clear hidden" id="searchClearBtn" onclick="clearSearch()" title="Очистить">✕</button>
+    </div>
     <button class="btn-primary" onclick="openForm(null)">+ Добавить точку</button>
   </div>
   <div id="tableWrap"></div>
@@ -196,6 +209,8 @@ ADMIN_HTML = """<!DOCTYPE html>
     <button class="btn-ghost" id="nextPageBtn" onclick="goToPage(currentPage + 1)">Вперёд →</button>
   </div>
 </div>
+
+<div id="loader" class="hidden"><div class="spinner"></div></div>
 
 <div class="modal-bg hidden" id="modalBg">
   <div class="modal">
@@ -247,6 +262,19 @@ ADMIN_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<div class="modal-bg hidden" id="deleteModalBg">
+  <div class="modal modal-sm">
+    <h2>Удалить точку</h2>
+    <p>Точка <b id="deleteShopIdLabel"></b> будет удалена без возможности восстановления —
+       все её настройки (ключи банка, секрет Tilda) исчезнут из БД.</p>
+    <div class="error" id="deleteError"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeDeleteModal()">Отмена</button>
+      <button class="btn-danger" onclick="confirmDelete()">Удалить</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let adminKey = sessionStorage.getItem('adminKey') || '';
 let editingShopId = null;
@@ -286,7 +314,15 @@ const PAGE_SIZE = 10;
 let allTenants = [];
 let currentPage = 1;
 
+function showLoader() {
+  document.getElementById('loader').classList.remove('hidden');
+}
+function hideLoader() {
+  document.getElementById('loader').classList.add('hidden');
+}
+
 async function boot() {
+  showLoader();
   try {
     allTenants = await api('/admin/api/tenants');
     document.getElementById('loginBox').classList.add('hidden');
@@ -297,12 +333,20 @@ async function boot() {
     if (e.message !== 'unauthorized') {
       document.getElementById('loginError').textContent = 'Ошибка: ' + e.message;
     }
+  } finally {
+    hideLoader();
   }
 }
 
 function onSearchChange() {
   currentPage = 1;
+  document.getElementById('searchClearBtn').classList.toggle('hidden', !document.getElementById('searchInn').value);
   renderTable();
+}
+
+function clearSearch() {
+  document.getElementById('searchInn').value = '';
+  onSearchChange();
 }
 
 function goToPage(page) {
@@ -384,7 +428,13 @@ async function openForm(shopId) {
   document.getElementById('f_bank_env').value = 'test';
 
   if (shopId) {
-    const t = await api('/admin/api/tenants/' + encodeURIComponent(shopId));
+    showLoader();
+    let t;
+    try {
+      t = await api('/admin/api/tenants/' + encodeURIComponent(shopId));
+    } finally {
+      hideLoader();
+    }
     document.getElementById('f_shop_id').value = t.shop_id;
     document.getElementById('f_shop_id').disabled = true;
     document.getElementById('f_bank_login').value = t.bank_login;
@@ -472,21 +522,42 @@ async function saveTenant() {
     inn: document.getElementById('f_inn').value.trim(),
   };
   try {
+    showLoader();
     await api('/admin/api/tenants/' + encodeURIComponent(shopId), { method: 'PUT', body: JSON.stringify(body) });
     closeForm();
-    boot();
+    await boot();
   } catch (e) {
     document.getElementById('formError').textContent = 'Ошибка: ' + e.message;
+  } finally {
+    hideLoader();
   }
 }
 
-async function removeTenant(shopId) {
-  if (!confirm(`Удалить точку "${shopId}"? Действие необратимо.`)) return;
+let deletingShopId = null;
+
+function removeTenant(shopId) {
+  deletingShopId = shopId;
+  document.getElementById('deleteShopIdLabel').textContent = shopId;
+  document.getElementById('deleteError').textContent = '';
+  document.getElementById('deleteModalBg').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+  document.getElementById('deleteModalBg').classList.add('hidden');
+  deletingShopId = null;
+}
+
+async function confirmDelete() {
+  if (!deletingShopId) return;
   try {
-    await api('/admin/api/tenants/' + encodeURIComponent(shopId), { method: 'DELETE' });
-    boot();
+    showLoader();
+    await api('/admin/api/tenants/' + encodeURIComponent(deletingShopId), { method: 'DELETE' });
+    closeDeleteModal();
+    await boot();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    document.getElementById('deleteError').textContent = 'Ошибка: ' + e.message;
+  } finally {
+    hideLoader();
   }
 }
 
