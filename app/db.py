@@ -36,6 +36,10 @@ class Tenant:
     tilda_fail_url: str = ""
     # Нужен банку в каждом запросе с чеком (не имеет дефолта от банка).
     inn: str = ""
+    # Информационные поля — не участвуют в запросах к банку, только для
+    # удобства идентификации точки в админ-панели и CLI.
+    merchant_name: str = ""
+    terminal_number: str = ""
 
     @property
     def api_host(self) -> str:
@@ -82,6 +86,8 @@ def init_db() -> None:
                 tilda_success_url TEXT NOT NULL DEFAULT '',
                 tilda_fail_url TEXT NOT NULL DEFAULT '',
                 inn TEXT NOT NULL DEFAULT '',
+                merchant_name TEXT NOT NULL DEFAULT '',
+                terminal_number TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             )
             """
@@ -93,6 +99,8 @@ def init_db() -> None:
         # читаются и не пишутся.)
         for col, default in (
             ("inn", ""),
+            ("merchant_name", ""),
+            ("terminal_number", ""),
         ):
             try:
                 conn.execute(f"ALTER TABLE tenants ADD COLUMN {col} TEXT NOT NULL DEFAULT '{default}'")
@@ -143,6 +151,8 @@ def add_tenant(
     tilda_success_url: str = "",
     tilda_fail_url: str = "",
     inn: str = "",
+    merchant_name: str = "",
+    terminal_number: str = "",
 ) -> None:
     with _conn() as conn:
         conn.execute(
@@ -150,8 +160,9 @@ def add_tenant(
             INSERT INTO tenants (
                 shop_id, bank_env, bank_owner_type, bank_login, bank_password_enc,
                 bank_terminal_id, tilda_login, tilda_order_secret_enc, tilda_notify_url,
-                tilda_success_url, tilda_fail_url, inn, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tilda_success_url, tilda_fail_url, inn, merchant_name, terminal_number,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(shop_id) DO UPDATE SET
                 bank_env=excluded.bank_env,
                 bank_owner_type=excluded.bank_owner_type,
@@ -163,7 +174,9 @@ def add_tenant(
                 tilda_notify_url=excluded.tilda_notify_url,
                 tilda_success_url=excluded.tilda_success_url,
                 tilda_fail_url=excluded.tilda_fail_url,
-                inn=excluded.inn
+                inn=excluded.inn,
+                merchant_name=excluded.merchant_name,
+                terminal_number=excluded.terminal_number
             """,
             (
                 shop_id,
@@ -178,6 +191,8 @@ def add_tenant(
                 tilda_success_url,
                 tilda_fail_url,
                 inn,
+                merchant_name,
+                terminal_number,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -201,6 +216,8 @@ def get_tenant(shop_id: str) -> Tenant | None:
         tilda_success_url=row["tilda_success_url"] or "",
         tilda_fail_url=row["tilda_fail_url"] or "",
         inn=row["inn"] or "",
+        merchant_name=row["merchant_name"] or "",
+        terminal_number=row["terminal_number"] or "",
     )
 
 

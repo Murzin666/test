@@ -37,6 +37,8 @@ def cmd_add(args: argparse.Namespace) -> None:
         tilda_success_url=args.success_url or "",
         tilda_fail_url=args.fail_url or "",
         inn=args.inn or "",
+        merchant_name=args.merchant_name or "",
+        terminal_number=args.terminal_number or "",
     )
     print(f"Точка '{args.shop_id}' сохранена.")
     print(f"API URL для формы Tilda: {args.public_base_url}/tilda/{args.shop_id}/checkout")
@@ -75,6 +77,8 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"tilda_success_url:   {tenant.tilda_success_url}")
     print(f"tilda_fail_url:      {tenant.tilda_fail_url}")
     print(f"inn:                 {tenant.inn or '(не задан — чек не формируется)'}")
+    print(f"merchant_name:       {tenant.merchant_name or '(не задано)'}")
+    print(f"terminal_number:     {tenant.terminal_number or '(не задан)'}")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -104,6 +108,18 @@ def main() -> None:
         dest="inn",
         default="",
         help="ИНН точки — обязателен, если хотите, чтобы сервер формировал чек (иначе банк применит свои дефолты терминала)",
+    )
+    p_add.add_argument(
+        "--merchant-name",
+        dest="merchant_name",
+        default="",
+        help="Название ТСП (торгово-сервисного предприятия) — для удобства идентификации точки",
+    )
+    p_add.add_argument(
+        "--terminal-number",
+        dest="terminal_number",
+        default="",
+        help="Номер терминала (не путать с Терминал ID для банка) — для удобства идентификации точки",
     )
     p_add.add_argument(
         "--public-base-url",

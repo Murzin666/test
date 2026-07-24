@@ -35,6 +35,8 @@ class TenantIn(BaseModel):
     tilda_success_url: str
     tilda_fail_url: str
     inn: str = ""
+    merchant_name: str
+    terminal_number: str
 
 
 def _tenant_summary(tenant: db.Tenant) -> dict:
@@ -51,6 +53,8 @@ def _tenant_summary(tenant: db.Tenant) -> dict:
         "tilda_success_url": tenant.tilda_success_url,
         "tilda_fail_url": tenant.tilda_fail_url,
         "inn": tenant.inn,
+        "merchant_name": tenant.merchant_name,
+        "terminal_number": tenant.terminal_number,
         "checkout_url": f"{settings.public_base_url}/tilda/{tenant.shop_id}/checkout",
     }
 
@@ -97,6 +101,8 @@ async def upsert_tenant_api(shop_id: str, body: TenantIn):
         tilda_success_url=body.tilda_success_url.strip(),
         tilda_fail_url=body.tilda_fail_url.strip(),
         inn=body.inn.strip(),
+        merchant_name=body.merchant_name.strip(),
+        terminal_number=body.terminal_number.strip(),
     )
     return _tenant_summary(db.get_tenant(shop_id))
 
@@ -197,7 +203,7 @@ ADMIN_HTML = """<!DOCTYPE html>
   <div class="sub">Управление точками, подключёнными к серверу-посреднику.</div>
   <div class="toolbar">
     <div class="search-wrap">
-      <input id="searchInn" placeholder="Поиск по ИНН…" oninput="onSearchChange()">
+      <input id="searchInn" placeholder="Поиск по ИНН или номеру терминала…" oninput="onSearchChange()">
       <button class="search-clear hidden" id="searchClearBtn" onclick="clearSearch()" title="Очистить">✕</button>
     </div>
     <button class="btn-primary" onclick="openForm(null)">+ Добавить точку</button>
@@ -219,9 +225,16 @@ ADMIN_HTML = """<!DOCTYPE html>
     <input id="f_shop_id" placeholder="shop2">
     <div class="hint">Короткий идентификатор — часть API URL, после создания не меняется.</div>
 
+    <label>Название ТСП</label>
+    <input id="f_merchant_name" placeholder="ООО «Ромашка»">
+
     <div class="grid2">
       <div><label>Логин банка</label><input id="f_bank_login" placeholder="+79000000001"></div>
       <div><label>Терминал ID</label><input id="f_bank_terminal_id" placeholder="279"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Номер терминала</label><input id="f_terminal_number" placeholder="T-00123"></div>
+      <div><label>ИНН</label><input id="f_inn" placeholder="7727401209"></div>
     </div>
     <label>Пароль банка</label>
     <input id="f_bank_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
@@ -251,8 +264,6 @@ ADMIN_HTML = """<!DOCTYPE html>
       <div><label>URL успеха</label><input id="f_tilda_success_url" placeholder="https://.../thanks"></div>
       <div><label>URL отказа</label><input id="f_tilda_fail_url" placeholder="https://.../payment-failed"></div>
     </div>
-    <label>ИНН</label>
-    <input id="f_inn" placeholder="7727401209">
 
     <div class="error" id="formError"></div>
     <div class="modal-actions">
@@ -357,7 +368,9 @@ function goToPage(page) {
 function getFilteredTenants() {
   const query = document.getElementById('searchInn').value.trim();
   if (!query) return allTenants;
-  return allTenants.filter(t => (t.inn || '').includes(query));
+  return allTenants.filter(t =>
+    (t.inn || '').includes(query) || (t.terminal_number || '').includes(query)
+  );
 }
 
 function renderTable() {
@@ -382,9 +395,9 @@ function renderTable() {
 
   const rows = pageItems.map(t => `
     <tr>
-      <td><b>${t.shop_id}</b><div class="checkout-url">${t.checkout_url}</div></td>
+      <td><b>${t.shop_id}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url">${t.checkout_url}</div></td>
       <td>${t.bank_env}</td>
-      <td>${t.bank_login}<br><span style="color:var(--ink-faint)">терминал ${t.bank_terminal_id}</span></td>
+      <td>${t.bank_login}<br><span style="color:var(--ink-faint)">терминал ${t.bank_terminal_id} · № ${t.terminal_number || '—'}</span></td>
       <td>${t.inn || '<span style="color:var(--coral)">нет ИНН</span>'}</td>
       <td class="row-actions">
         <button class="btn-ghost" onclick="openForm('${t.shop_id}')">Изменить</button>
@@ -413,7 +426,8 @@ async function openForm(shopId) {
   clearFieldErrors();
   document.getElementById('modalTitle').textContent = shopId ? `Изменить: ${shopId}` : 'Новая точка';
   const ids = ['bank_login','bank_password','bank_terminal_id','bank_owner_type','bank_env',
-               'tilda_secret','tilda_notify_url','tilda_success_url','tilda_fail_url','inn'];
+               'tilda_secret','tilda_notify_url','tilda_success_url','tilda_fail_url','inn',
+               'merchant_name','terminal_number'];
   ids.forEach(id => document.getElementById('f_' + id).value = '');
   document.getElementById('f_shop_id').value = '';
   document.getElementById('f_shop_id').disabled = false;
@@ -445,6 +459,8 @@ async function openForm(shopId) {
     document.getElementById('f_tilda_success_url').value = t.tilda_success_url;
     document.getElementById('f_tilda_fail_url').value = t.tilda_fail_url;
     document.getElementById('f_inn').value = t.inn;
+    document.getElementById('f_merchant_name').value = t.merchant_name;
+    document.getElementById('f_terminal_number').value = t.terminal_number;
     document.getElementById('f_bank_password').placeholder = t.bank_password_set
       ? '•••••• (задан — оставьте пустым, чтобы не менять)' : 'обязательно';
     document.getElementById('f_tilda_secret').placeholder = t.tilda_secret_set
@@ -458,7 +474,8 @@ function closeForm() {
 }
 
 const REQUIRED_FIELD_IDS = ['shop_id', 'bank_login', 'bank_terminal_id', 'bank_owner_type',
-                            'bank_env', 'tilda_notify_url', 'tilda_success_url', 'tilda_fail_url', 'inn'];
+                            'bank_env', 'tilda_notify_url', 'tilda_success_url', 'tilda_fail_url', 'inn',
+                            'merchant_name', 'terminal_number'];
 // bank_password и tilda_secret обязательны только при создании новой точки
 // (при редактировании пустое значение означает "не менять") — единственное
 // оставшееся исключение из общего правила "все поля обязательны".
@@ -520,6 +537,8 @@ async function saveTenant() {
     tilda_success_url: document.getElementById('f_tilda_success_url').value.trim(),
     tilda_fail_url: document.getElementById('f_tilda_fail_url').value.trim(),
     inn: document.getElementById('f_inn').value.trim(),
+    merchant_name: document.getElementById('f_merchant_name').value.trim(),
+    terminal_number: document.getElementById('f_terminal_number').value.trim(),
   };
   try {
     showLoader();
