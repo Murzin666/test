@@ -25,8 +25,8 @@ def require_admin(x_admin_key: str = Header(default="")) -> None:
 
 
 class TenantIn(BaseModel):
-    bank_login: str
-    bank_password: str = ""
+    tsp_login: str
+    tsp_password: str = ""
     bank_terminal_id: str
     bank_owner_type: str = "MultiMerchant"
     bank_env: str = "test"
@@ -41,11 +41,11 @@ class TenantIn(BaseModel):
 
 def _tenant_summary(tenant: db.Tenant) -> dict:
     return {
-        "shop_id": tenant.shop_id,
+        "url_tilda": tenant.url_tilda,
         "bank_env": tenant.bank_env,
         "bank_owner_type": tenant.bank_owner_type,
-        "bank_login": tenant.bank_login,
-        "bank_password_set": bool(tenant.bank_password),
+        "tsp_login": tenant.tsp_login,
+        "tsp_password_set": bool(tenant.tsp_password),
         "bank_terminal_id": tenant.bank_terminal_id,
         "tilda_login": tenant.tilda_login,
         "tilda_secret_set": bool(tenant.tilda_order_secret),
@@ -55,32 +55,32 @@ def _tenant_summary(tenant: db.Tenant) -> dict:
         "inn": tenant.inn,
         "merchant_name": tenant.merchant_name,
         "terminal_number": tenant.terminal_number,
-        "checkout_url": f"{settings.public_base_url}/tilda/{tenant.shop_id}/checkout",
+        "checkout_url": f"{settings.public_base_url}/tilda/{tenant.url_tilda}/checkout",
     }
 
 
 @router.get("/admin/api/tenants", dependencies=[Depends(require_admin)])
 async def list_tenants_api():
-    return [_tenant_summary(db.get_tenant(shop_id)) for shop_id in db.list_tenants()]
+    return [_tenant_summary(db.get_tenant(url_tilda)) for url_tilda in db.list_tenants()]
 
 
-@router.get("/admin/api/tenants/{shop_id}", dependencies=[Depends(require_admin)])
-async def get_tenant_api(shop_id: str):
-    tenant = db.get_tenant(shop_id)
+@router.get("/admin/api/tenants/{url_tilda}", dependencies=[Depends(require_admin)])
+async def get_tenant_api(url_tilda: str):
+    tenant = db.get_tenant(url_tilda)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Точка не найдена")
     return _tenant_summary(tenant)
 
 
-@router.put("/admin/api/tenants/{shop_id}", dependencies=[Depends(require_admin)])
-async def upsert_tenant_api(shop_id: str, body: TenantIn):
-    existing = db.get_tenant(shop_id)
+@router.put("/admin/api/tenants/{url_tilda}", dependencies=[Depends(require_admin)])
+async def upsert_tenant_api(url_tilda: str, body: TenantIn):
+    existing = db.get_tenant(url_tilda)
 
-    bank_password = body.bank_password.strip()
-    if not bank_password:
+    tsp_password = body.tsp_password.strip()
+    if not tsp_password:
         if existing is None:
-            raise HTTPException(status_code=400, detail="Пароль банка обязателен для новой точки")
-        bank_password = existing.bank_password
+            raise HTTPException(status_code=400, detail="Пароль ТСП обязателен для новой точки")
+        tsp_password = existing.tsp_password
 
     tilda_secret = body.tilda_secret.strip()
     if not tilda_secret:
@@ -89,9 +89,9 @@ async def upsert_tenant_api(shop_id: str, body: TenantIn):
         tilda_secret = existing.tilda_order_secret
 
     db.add_tenant(
-        shop_id=shop_id,
-        bank_login=body.bank_login.strip(),
-        bank_password=bank_password,
+        url_tilda=url_tilda,
+        tsp_login=body.tsp_login.strip(),
+        tsp_password=tsp_password,
         bank_terminal_id=body.bank_terminal_id.strip(),
         tilda_login=body.bank_terminal_id.strip(),
         tilda_order_secret=tilda_secret,
@@ -104,14 +104,14 @@ async def upsert_tenant_api(shop_id: str, body: TenantIn):
         merchant_name=body.merchant_name.strip(),
         terminal_number=body.terminal_number.strip(),
     )
-    return _tenant_summary(db.get_tenant(shop_id))
+    return _tenant_summary(db.get_tenant(url_tilda))
 
 
-@router.delete("/admin/api/tenants/{shop_id}", dependencies=[Depends(require_admin)])
-async def delete_tenant_api(shop_id: str):
-    if db.get_tenant(shop_id) is None:
+@router.delete("/admin/api/tenants/{url_tilda}", dependencies=[Depends(require_admin)])
+async def delete_tenant_api(url_tilda: str):
+    if db.get_tenant(url_tilda) is None:
         raise HTTPException(status_code=404, detail="Точка не найдена")
-    db.delete_tenant(shop_id)
+    db.delete_tenant(url_tilda)
     return {"ok": True}
 
 
@@ -221,23 +221,23 @@ ADMIN_HTML = """<!DOCTYPE html>
 <div class="modal-bg hidden" id="modalBg">
   <div class="modal">
     <h2 id="modalTitle">Новая точка</h2>
-    <label>shop_id</label>
-    <input id="f_shop_id" placeholder="shop2">
+    <label>URL Tilda</label>
+    <input id="f_url_tilda" placeholder="shop2">
     <div class="hint">Короткий идентификатор — часть API URL, после создания не меняется.</div>
 
     <label>Название ТСП</label>
     <input id="f_merchant_name" placeholder="ООО «Ромашка»">
 
     <div class="grid2">
-      <div><label>Логин банка</label><input id="f_bank_login" placeholder="+79000000001"></div>
+      <div><label>Логин ТСП</label><input id="f_tsp_login" placeholder="+79000000001"></div>
       <div><label>Терминал ID TXPG</label><input id="f_bank_terminal_id" placeholder="279"></div>
     </div>
     <div class="grid2">
       <div><label>Номер терминала</label><input id="f_terminal_number" placeholder="T-00123"></div>
       <div><label>ИНН</label><input id="f_inn" placeholder="7727401209"></div>
     </div>
-    <label>Пароль банка</label>
-    <input id="f_bank_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
+    <label>Пароль ТСП</label>
+    <input id="f_tsp_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
 
     <div class="grid2">
       <div>
@@ -396,18 +396,19 @@ function renderTable() {
   const rows = pageItems.map(t => `
     <tr>
       <td><b>${t.terminal_number || '—'}</b></td>
-      <td><b>${t.shop_id}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url">${t.checkout_url}</div></td>
+      <td><b>${t.url_tilda}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url">${t.checkout_url}</div></td>
       <td>${t.bank_env}</td>
-      <td>${t.bank_login}<br><span style="color:var(--ink-faint)">терминал ID TXPG ${t.bank_terminal_id}</span></td>
+      <td>${t.tsp_login}</td>
+      <td>${t.bank_terminal_id}</td>
       <td>${t.inn || '<span style="color:var(--coral)">нет ИНН</span>'}</td>
       <td class="row-actions">
-        <button class="btn-ghost" onclick="openForm('${t.shop_id}')">Изменить</button>
-        <button class="btn-danger" onclick="removeTenant('${t.shop_id}')">Удалить</button>
+        <button class="btn-ghost" onclick="openForm('${t.url_tilda}')">Изменить</button>
+        <button class="btn-danger" onclick="removeTenant('${t.url_tilda}')">Удалить</button>
       </td>
     </tr>
   `).join('');
   wrap.innerHTML = `<table>
-    <tr><th>Номер терминала</th><th>Точка</th><th>Среда</th><th>Банк</th><th>ИНН</th><th></th></tr>
+    <tr><th>Номер терминала</th><th>URL Tilda</th><th>Среда</th><th>Логин ТСП</th><th>Терминал ID TXPG</th><th>ИНН</th><th></th></tr>
     ${rows}
   </table>`;
 
@@ -426,18 +427,18 @@ async function openForm(shopId) {
   document.getElementById('formError').textContent = '';
   clearFieldErrors();
   document.getElementById('modalTitle').textContent = shopId ? `Изменить: ${shopId}` : 'Новая точка';
-  const ids = ['bank_login','bank_password','bank_terminal_id','bank_owner_type','bank_env',
+  const ids = ['tsp_login','tsp_password','bank_terminal_id','bank_owner_type','bank_env',
                'tilda_secret','tilda_notify_url','tilda_success_url','tilda_fail_url','inn',
                'merchant_name','terminal_number'];
   ids.forEach(id => document.getElementById('f_' + id).value = '');
-  document.getElementById('f_shop_id').value = '';
-  document.getElementById('f_shop_id').disabled = false;
+  document.getElementById('f_url_tilda').value = '';
+  document.getElementById('f_url_tilda').disabled = false;
 
   // Плейсхолдеры и выпадающие списки — сбрасываем к дефолтам новой точки.
   // Иначе при повторном открытии формы после редактирования другой точки
   // остаются старые подсказки/значения (поля переиспользуются между
   // созданием и редактированием).
-  document.getElementById('f_bank_password').placeholder = 'обязательно';
+  document.getElementById('f_tsp_password').placeholder = 'обязательно';
   document.getElementById('f_tilda_secret').placeholder = 'обязательно';
   document.getElementById('f_bank_owner_type').value = 'MultiMerchant';
   document.getElementById('f_bank_env').value = 'test';
@@ -450,9 +451,9 @@ async function openForm(shopId) {
     } finally {
       hideLoader();
     }
-    document.getElementById('f_shop_id').value = t.shop_id;
-    document.getElementById('f_shop_id').disabled = true;
-    document.getElementById('f_bank_login').value = t.bank_login;
+    document.getElementById('f_url_tilda').value = t.url_tilda;
+    document.getElementById('f_url_tilda').disabled = true;
+    document.getElementById('f_tsp_login').value = t.tsp_login;
     document.getElementById('f_bank_terminal_id').value = t.bank_terminal_id;
     document.getElementById('f_bank_owner_type').value = t.bank_owner_type;
     document.getElementById('f_bank_env').value = t.bank_env;
@@ -462,7 +463,7 @@ async function openForm(shopId) {
     document.getElementById('f_inn').value = t.inn;
     document.getElementById('f_merchant_name').value = t.merchant_name;
     document.getElementById('f_terminal_number').value = t.terminal_number;
-    document.getElementById('f_bank_password').placeholder = t.bank_password_set
+    document.getElementById('f_tsp_password').placeholder = t.tsp_password_set
       ? '•••••• (задан — оставьте пустым, чтобы не менять)' : 'обязательно';
     document.getElementById('f_tilda_secret').placeholder = t.tilda_secret_set
       ? '•••••• (задан — оставьте пустым, чтобы не менять)' : 'обязательно';
@@ -474,15 +475,15 @@ function closeForm() {
   document.getElementById('modalBg').classList.add('hidden');
 }
 
-const REQUIRED_FIELD_IDS = ['shop_id', 'bank_login', 'bank_terminal_id', 'bank_owner_type',
+const REQUIRED_FIELD_IDS = ['url_tilda', 'tsp_login', 'bank_terminal_id', 'bank_owner_type',
                             'bank_env', 'tilda_notify_url', 'tilda_success_url', 'tilda_fail_url', 'inn',
                             'merchant_name', 'terminal_number'];
-// bank_password и tilda_secret обязательны только при создании новой точки
+// tsp_password и tilda_secret обязательны только при создании новой точки
 // (при редактировании пустое значение означает "не менять") — единственное
 // оставшееся исключение из общего правила "все поля обязательны".
 
 function clearFieldErrors() {
-  [...REQUIRED_FIELD_IDS, 'bank_password', 'tilda_secret'].forEach(id => {
+  [...REQUIRED_FIELD_IDS, 'tsp_password', 'tilda_secret'].forEach(id => {
     document.getElementById('f_' + id).classList.remove('input-error');
   });
 }
@@ -502,7 +503,7 @@ function validateForm() {
   });
 
   if (!editingShopId) {
-    ['bank_password', 'tilda_secret'].forEach(id => {
+    ['tsp_password', 'tilda_secret'].forEach(id => {
       const el = document.getElementById('f_' + id);
       if (!el.value.trim()) {
         el.classList.add('input-error');
@@ -526,10 +527,10 @@ async function saveTenant() {
     return;
   }
 
-  const shopId = document.getElementById('f_shop_id').value.trim();
+  const shopId = document.getElementById('f_url_tilda').value.trim();
   const body = {
-    bank_login: document.getElementById('f_bank_login').value.trim(),
-    bank_password: document.getElementById('f_bank_password').value,
+    tsp_login: document.getElementById('f_tsp_login').value.trim(),
+    tsp_password: document.getElementById('f_tsp_password').value,
     bank_terminal_id: document.getElementById('f_bank_terminal_id').value.trim(),
     bank_owner_type: document.getElementById('f_bank_owner_type').value,
     bank_env: document.getElementById('f_bank_env').value,

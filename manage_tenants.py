@@ -3,8 +3,8 @@
 Управление торговыми точками (tenants) вручную из командной строки.
 
 Локально:
-    python3 manage_tenants.py add shop1 --bank-login "+79000000001" \
-        --bank-password "секрет_банка" --terminal-id 279 \
+    python3 manage_tenants.py add shop1 --tsp-login "+79000000001" \
+        --tsp-password "секрет_банка" --terminal-id 279 \
         --tilda-secret "секрет_из_формы_tilda" \
         --notify-url "https://forms.tildaapi.one/payment/custom/psXXXXXXX"
 
@@ -14,7 +14,7 @@
 
 На Railway (без захода по SSH) — через Railway CLI, которое выполняет
 команду уже в окружении с доступом к вашей БД и ENCRYPTION_KEY:
-    railway run python manage_tenants.py add shop1 --bank-login ...
+    railway run python manage_tenants.py add shop1 --tsp-login ...
 """
 import argparse
 import sys
@@ -25,9 +25,9 @@ from app import db
 def cmd_add(args: argparse.Namespace) -> None:
     db.init_db()
     db.add_tenant(
-        shop_id=args.shop_id,
-        bank_login=args.bank_login,
-        bank_password=args.bank_password,
+        url_tilda=args.url_tilda,
+        tsp_login=args.tsp_login,
+        tsp_password=args.tsp_password,
         bank_terminal_id=args.terminal_id,
         tilda_login=args.terminal_id,
         tilda_order_secret=args.tilda_secret,
@@ -40,8 +40,8 @@ def cmd_add(args: argparse.Namespace) -> None:
         merchant_name=args.merchant_name or "",
         terminal_number=args.terminal_number or "",
     )
-    print(f"Точка '{args.shop_id}' сохранена.")
-    print(f"API URL для формы Tilda: {args.public_base_url}/tilda/{args.shop_id}/checkout")
+    print(f"Точка '{args.url_tilda}' сохранена.")
+    print(f"API URL для формы Tilda: {args.public_base_url}/tilda/{args.url_tilda}/checkout")
     if not args.inn:
         print(
             "ВНИМАНИЕ: ИНН (--inn) не указан — чек для банка формироваться не будет, "
@@ -55,21 +55,21 @@ def cmd_list(_: argparse.Namespace) -> None:
     if not tenants:
         print("Торговых точек пока нет.")
         return
-    for shop_id in tenants:
-        print(shop_id)
+    for url_tilda in tenants:
+        print(url_tilda)
 
 
 def cmd_show(args: argparse.Namespace) -> None:
     db.init_db()
-    tenant = db.get_tenant(args.shop_id)
+    tenant = db.get_tenant(args.url_tilda)
     if tenant is None:
-        print(f"Точка '{args.shop_id}' не найдена.", file=sys.stderr)
+        print(f"Точка '{args.url_tilda}' не найдена.", file=sys.stderr)
         sys.exit(1)
-    print(f"shop_id:            {tenant.shop_id}")
+    print(f"url_tilda:            {tenant.url_tilda}")
     print(f"bank_env:            {tenant.bank_env}")
     print(f"bank_owner_type:     {tenant.bank_owner_type}")
-    print(f"bank_login:          {tenant.bank_login}")
-    print(f"bank_password:       {'*' * len(tenant.bank_password)}")
+    print(f"tsp_login:          {tenant.tsp_login}")
+    print(f"tsp_password:       {'*' * len(tenant.tsp_password)}")
     print(f"bank_terminal_id:    {tenant.bank_terminal_id}")
     print(f"tilda_login:         {tenant.tilda_login}")
     print(f"tilda_order_secret:  {'*' * len(tenant.tilda_order_secret)}")
@@ -83,8 +83,8 @@ def cmd_show(args: argparse.Namespace) -> None:
 
 def cmd_remove(args: argparse.Namespace) -> None:
     db.init_db()
-    db.delete_tenant(args.shop_id)
-    print(f"Точка '{args.shop_id}' удалена.")
+    db.delete_tenant(args.url_tilda)
+    print(f"Точка '{args.url_tilda}' удалена.")
 
 
 def main() -> None:
@@ -92,9 +92,9 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_add = sub.add_parser("add", help="Добавить или обновить точку")
-    p_add.add_argument("shop_id", help="Короткий идентификатор точки, например shop1")
-    p_add.add_argument("--bank-login", required=True)
-    p_add.add_argument("--bank-password", required=True)
+    p_add.add_argument("url_tilda", help="Короткий идентификатор точки, например shop1")
+    p_add.add_argument("--tsp-login", required=True)
+    p_add.add_argument("--tsp-password", required=True)
     p_add.add_argument("--terminal-id", required=True, dest="terminal_id",
                         help="ID терминала банка — используется и как логин для формы Tilda (tilda_login)")
     p_add.add_argument("--owner-type", default="MultiMerchant")
@@ -129,15 +129,15 @@ def main() -> None:
     )
     p_add.set_defaults(func=cmd_add)
 
-    p_list = sub.add_parser("list", help="Показать все shop_id")
+    p_list = sub.add_parser("list", help="Показать все url_tilda")
     p_list.set_defaults(func=cmd_list)
 
     p_show = sub.add_parser("show", help="Показать настройки точки (секреты замаскированы)")
-    p_show.add_argument("shop_id")
+    p_show.add_argument("url_tilda")
     p_show.set_defaults(func=cmd_show)
 
     p_remove = sub.add_parser("remove", help="Удалить точку")
-    p_remove.add_argument("shop_id")
+    p_remove.add_argument("url_tilda")
     p_remove.set_defaults(func=cmd_remove)
 
     args = parser.parse_args()

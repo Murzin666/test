@@ -1,12 +1,12 @@
 # Несколько торговых точек на одном сервере
 
 Один и тот же сервер теперь обслуживает сколько угодно торговых точек.
-У каждой — свой `shop_id` (короткий идентификатор, который вы придумываете
+У каждой — свой `url_tilda` (короткий идентификатор, который вы придумываете
 сами, например `shop1`, `cafe-vostok`) и свой персональный набор URL:
 
 ```
-API URL для формы Tilda:      https://<ваш-домен>/tilda/<shop_id>/checkout
-Возврат покупателя после оплаты: https://<ваш-домен>/tilda/<shop_id>/return  (настраивается сервером автоматически)
+API URL для формы Tilda:      https://<ваш-домен>/tilda/<url_tilda>/checkout
+Возврат покупателя после оплаты: https://<ваш-домен>/tilda/<url_tilda>/return  (настраивается сервером автоматически)
 ```
 
 Настройки самой точки (логин/пароль банка, terminalId, секрет Tilda) хранятся
@@ -72,8 +72,8 @@ ENCRYPTION_KEY):
 
 ```bash
 railway run python manage_tenants.py add shop1 \
-  --bank-login "+79040001313" \
-  --bank-password "секрет_банка" \
+  --tsp-login "+79040001313" \
+  --tsp-password "секрет_банка" \
   --terminal-id 279 \
   --tilda-secret "секрет_из_формы_tilda_для_этой_точки" \
   --notify-url "https://forms.tildaapi.one/payment/custom/psXXXXXXX" \
@@ -89,7 +89,7 @@ railway run python manage_tenants.py add shop1 \
 
 Другие полезные команды:
 ```bash
-railway run python manage_tenants.py list          # список всех shop_id
+railway run python manage_tenants.py list          # список всех url_tilda
 railway run python manage_tenants.py show shop1     # настройки точки (секреты замаскированы)
 railway run python manage_tenants.py remove shop1   # удалить точку
 ```

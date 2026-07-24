@@ -59,8 +59,8 @@ curl http://localhost:8000/api/health
 
 ```bash
 python3 manage_tenants.py add shop1 \
-  --bank-login "+79040001313" \
-  --bank-password "секрет_банка" \
+  --tsp-login "+79040001313" \
+  --tsp-password "секрет_банка" \
   --terminal-id 279 \
   --tilda-secret "секрет_из_формы_tilda" \
   --notify-url "https://forms.tildaapi.one/payment/custom/psXXXXXXX"
@@ -70,7 +70,7 @@ python3 manage_tenants.py add shop1 \
 Универсальной платёжной системы на Tilda (подробности —
 `tilda-integration/universal-payment-system.md`).
 
-Другие команды: `manage_tenants.py list`, `show <shop_id>`, `remove <shop_id>`.
+Другие команды: `manage_tenants.py list`, `show <url_tilda>`, `remove <url_tilda>`.
 
 ## 5. Подключение к Tilda
 
@@ -116,13 +116,13 @@ git push -u origin main
 
 Добавление точек на уже задеплоенный сервер — через Railway CLI:
 ```bash
-railway run python manage_tenants.py add shop2 --bank-login ... 
+railway run python manage_tenants.py add shop2 --tsp-login ... 
 ```
 
 ## Что доделать перед серьёзной нагрузкой
 
 1. **Идемпотентность** — если Tilda или покупатель повторно дёрнут
-   `/tilda/<shop_id>/checkout` для одного и того же `order_id`, сейчас
+   `/tilda/<url_tilda>/checkout` для одного и того же `order_id`, сейчас
    создастся второй заказ в банке. Стоит проверять `db.get_tilda_link` перед
    созданием нового заказа в банке.
 2. **Логирование** — добавить логи обращений к банку и к Tilda notify-url

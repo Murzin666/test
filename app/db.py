@@ -23,11 +23,11 @@ from .crypto import decrypt, encrypt
 
 @dataclass
 class Tenant:
-    shop_id: str
+    url_tilda: str
     bank_env: str
     bank_owner_type: str
-    bank_login: str
-    bank_password: str
+    tsp_login: str
+    tsp_password: str
     bank_terminal_id: str
     tilda_login: str
     tilda_order_secret: str
@@ -53,7 +53,7 @@ class Tenant:
     def basic_auth_header(self) -> str:
         import base64
 
-        raw = f"{self.bank_owner_type}/{self.bank_login}:{self.bank_password}"
+        raw = f"{self.bank_owner_type}/{self.tsp_login}:{self.tsp_password}"
         token = base64.b64encode(raw.encode("utf-8")).decode("ascii")
         return f"Basic {token}"
 
@@ -74,11 +74,11 @@ def init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tenants (
-                shop_id TEXT PRIMARY KEY,
+                url_tilda TEXT PRIMARY KEY,
                 bank_env TEXT NOT NULL DEFAULT 'test',
                 bank_owner_type TEXT NOT NULL DEFAULT 'MultiMerchant',
-                bank_login TEXT NOT NULL,
-                bank_password_enc TEXT NOT NULL,
+                tsp_login TEXT NOT NULL,
+                tsp_password_enc TEXT NOT NULL,
                 bank_terminal_id TEXT NOT NULL,
                 tilda_login TEXT NOT NULL,
                 tilda_order_secret_enc TEXT NOT NULL,
@@ -92,6 +92,21 @@ def init_db() -> None:
             )
             """
         )
+        # Переименование старых колонок в БД, созданной более ранней версией
+        # кода (bank_login/bank_password_enc -> tsp_login/tsp_password_enc).
+        # На новой, только что созданной БД эти колонки уже называются
+        # правильно, и попытка переименования просто ничего не найдёт —
+        # ошибка перехватывается и игнорируется.
+        for old_col, new_col in (
+            ("bank_login", "tsp_login"),
+            ("bank_password_enc", "tsp_password_enc"),
+            ("shop_id", "url_tilda"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE tenants RENAME COLUMN {old_col} TO {new_col}")
+            except sqlite3.OperationalError:
+                pass  # колонка уже переименована или изначально называлась иначе
+
         # На случай, если БД была создана более ранней версией без этих колонок.
         # (tax_system_code, default_tax_rate, default_item_type, default_calc_mode
         # сюда сознательно не входят — эти поля больше не используются в коде;
@@ -111,18 +126,23 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS orders (
                 bank_order_id INTEGER PRIMARY KEY,
-                shop_id TEXT NOT NULL,
+                url_tilda TEXT NOT NULL,
                 password TEXT NOT NULL,
                 amount REAL NOT NULL,
                 created_at TEXT NOT NULL
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE orders RENAME COLUMN shop_id TO url_tilda")
+        except sqlite3.OperationalError:
+            pass  # колонка уже переименована или изначально называлась иначе
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tilda_links (
                 tilda_order_id TEXT PRIMARY KEY,
-                shop_id TEXT NOT NULL,
+                url_tilda TEXT NOT NULL,
                 bank_order_id INTEGER NOT NULL,
                 amount REAL NOT NULL,
                 notified INTEGER NOT NULL DEFAULT 0,
@@ -130,6 +150,10 @@ def init_db() -> None:
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE tilda_links RENAME COLUMN shop_id TO url_tilda")
+        except sqlite3.OperationalError:
+            pass  # колонка уже переименована или изначально называлась иначе
         try:
             conn.execute("ALTER TABLE tilda_links ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
@@ -139,9 +163,9 @@ def init_db() -> None:
 # ---------- Торговые точки ----------
 
 def add_tenant(
-    shop_id: str,
-    bank_login: str,
-    bank_password: str,
+    url_tilda: str,
+    tsp_login: str,
+    tsp_password: str,
     bank_terminal_id: str,
     tilda_login: str,
     tilda_order_secret: str,
@@ -158,16 +182,16 @@ def add_tenant(
         conn.execute(
             """
             INSERT INTO tenants (
-                shop_id, bank_env, bank_owner_type, bank_login, bank_password_enc,
+                url_tilda, bank_env, bank_owner_type, tsp_login, tsp_password_enc,
                 bank_terminal_id, tilda_login, tilda_order_secret_enc, tilda_notify_url,
                 tilda_success_url, tilda_fail_url, inn, merchant_name, terminal_number,
                 created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(shop_id) DO UPDATE SET
+            ON CONFLICT(url_tilda) DO UPDATE SET
                 bank_env=excluded.bank_env,
                 bank_owner_type=excluded.bank_owner_type,
-                bank_login=excluded.bank_login,
-                bank_password_enc=excluded.bank_password_enc,
+                tsp_login=excluded.tsp_login,
+                tsp_password_enc=excluded.tsp_password_enc,
                 bank_terminal_id=excluded.bank_terminal_id,
                 tilda_login=excluded.tilda_login,
                 tilda_order_secret_enc=excluded.tilda_order_secret_enc,
@@ -179,11 +203,11 @@ def add_tenant(
                 terminal_number=excluded.terminal_number
             """,
             (
-                shop_id,
+                url_tilda,
                 bank_env,
                 bank_owner_type,
-                bank_login,
-                encrypt(bank_password),
+                tsp_login,
+                encrypt(tsp_password),
                 bank_terminal_id,
                 tilda_login,
                 encrypt(tilda_order_secret),
@@ -198,17 +222,17 @@ def add_tenant(
         )
 
 
-def get_tenant(shop_id: str) -> Tenant | None:
+def get_tenant(url_tilda: str) -> Tenant | None:
     with _conn() as conn:
-        row = conn.execute("SELECT * FROM tenants WHERE shop_id = ?", (shop_id,)).fetchone()
+        row = conn.execute("SELECT * FROM tenants WHERE url_tilda = ?", (url_tilda,)).fetchone()
     if row is None:
         return None
     return Tenant(
-        shop_id=row["shop_id"],
+        url_tilda=row["url_tilda"],
         bank_env=row["bank_env"],
         bank_owner_type=row["bank_owner_type"],
-        bank_login=row["bank_login"],
-        bank_password=decrypt(row["bank_password_enc"]),
+        tsp_login=row["tsp_login"],
+        tsp_password=decrypt(row["tsp_password_enc"]),
         bank_terminal_id=row["bank_terminal_id"],
         tilda_login=row["tilda_login"],
         tilda_order_secret=decrypt(row["tilda_order_secret_enc"]),
@@ -223,23 +247,23 @@ def get_tenant(shop_id: str) -> Tenant | None:
 
 def list_tenants() -> list[str]:
     with _conn() as conn:
-        rows = conn.execute("SELECT shop_id FROM tenants ORDER BY shop_id").fetchall()
-    return [r["shop_id"] for r in rows]
+        rows = conn.execute("SELECT url_tilda FROM tenants ORDER BY url_tilda").fetchall()
+    return [r["url_tilda"] for r in rows]
 
 
-def delete_tenant(shop_id: str) -> None:
+def delete_tenant(url_tilda: str) -> None:
     with _conn() as conn:
-        conn.execute("DELETE FROM tenants WHERE shop_id = ?", (shop_id,))
+        conn.execute("DELETE FROM tenants WHERE url_tilda = ?", (url_tilda,))
 
 
 # ---------- Заказы ----------
 
-def save_order(shop_id: str, bank_order_id: int, password: str, amount: float) -> None:
+def save_order(url_tilda: str, bank_order_id: int, password: str, amount: float) -> None:
     with _conn() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO orders (bank_order_id, shop_id, password, amount, created_at) "
+            "INSERT OR REPLACE INTO orders (bank_order_id, url_tilda, password, amount, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (bank_order_id, shop_id, password, amount, datetime.now(timezone.utc).isoformat()),
+            (bank_order_id, url_tilda, password, amount, datetime.now(timezone.utc).isoformat()),
         )
 
 
@@ -249,12 +273,12 @@ def get_order(bank_order_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def save_tilda_link(tilda_order_id: str, shop_id: str, bank_order_id: int, amount: float) -> None:
+def save_tilda_link(tilda_order_id: str, url_tilda: str, bank_order_id: int, amount: float) -> None:
     with _conn() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO tilda_links (tilda_order_id, shop_id, bank_order_id, amount, notified, created_at) "
+            "INSERT OR REPLACE INTO tilda_links (tilda_order_id, url_tilda, bank_order_id, amount, notified, created_at) "
             "VALUES (?, ?, ?, ?, 0, ?)",
-            (tilda_order_id, shop_id, bank_order_id, amount, datetime.now(timezone.utc).isoformat()),
+            (tilda_order_id, url_tilda, bank_order_id, amount, datetime.now(timezone.utc).isoformat()),
         )
 
 

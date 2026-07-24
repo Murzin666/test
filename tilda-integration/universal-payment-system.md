@@ -2,7 +2,7 @@
 
 Официальный протокол Tilda для подключения платёжных систем, которых нет в
 готовом списке. Сервер поддерживает сразу несколько торговых точек — у
-каждой свой `shop_id` и свой набор URL, см. `multi-tenant.md`.
+каждой свой `url_tilda` и свой набор URL, см. `multi-tenant.md`.
 
 ## Как это работает
 
@@ -22,8 +22,8 @@
 шаблон «Новая платёжная система (для разработчиков)». Точные значения полей
 были согласованы в переписке с Claude при настройке — коротко:
 
-- **API URL**: `https://<ваш-домен-на-railway>/tilda/<shop_id>/checkout`
-  (`shop_id` — идентификатор именно этой точки, см. `multi-tenant.md`;
+- **API URL**: `https://<ваш-домен-на-railway>/tilda/<url_tilda>/checkout`
+  (`url_tilda` — идентификатор именно этой точки, см. `multi-tenant.md`;
   команда `manage_tenants.py add` печатает готовую ссылку)
 - **Поля**: `login`, `currency`, `language`, `country`, `notify_url`,
   `order_id`, `order_desc`, `order_amount`, `order_time`, `client_email`,

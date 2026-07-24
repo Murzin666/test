@@ -41,10 +41,10 @@ def require_admin(x_admin_key: str = Header(default="")) -> None:
         raise HTTPException(status_code=401, detail="Неверный или отсутствующий X-Admin-Key")
 
 
-def _get_tenant_or_404(shop_id: str) -> db.Tenant:
-    tenant = db.get_tenant(shop_id)
+def _get_tenant_or_404(url_tilda: str) -> db.Tenant:
+    tenant = db.get_tenant(url_tilda)
     if tenant is None:
-        raise HTTPException(status_code=404, detail=f"Неизвестная торговая точка: {shop_id}")
+        raise HTTPException(status_code=404, detail=f"Неизвестная торговая точка: {url_tilda}")
     return tenant
 
 
@@ -77,7 +77,7 @@ def _fiscal_code(value):
 
 def _build_receipt(
     tenant: db.Tenant,
-    shop_id: str,
+    url_tilda: str,
     products_json: str,
     tilda_receipt_json: str,
     amount: float,
@@ -98,13 +98,13 @@ def _build_receipt(
     ИНН в каждом запросе с чеком, дефолта для него нет.
     """
     if not tenant.inn:
-        logger.warning("shop_id=%s: ИНН не задан, чек для банка не формируется", shop_id)
+        logger.warning("url_tilda=%s: ИНН не задан, чек для банка не формируется", url_tilda)
         return None
 
     try:
         products = json.loads(products_json or "[]")
     except (TypeError, ValueError):
-        logger.warning("shop_id=%s: не удалось разобрать products от Tilda: %r", shop_id, products_json)
+        logger.warning("url_tilda=%s: не удалось разобрать products от Tilda: %r", url_tilda, products_json)
         products = []
 
     try:
@@ -123,14 +123,14 @@ def _build_receipt(
         tax_system_code = TAXATION_TO_TAX_SYSTEM_CODE.get(taxation)
         if tax_system_code is None:
             logger.warning(
-                "shop_id=%s: система налогообложения %r от Tilda не распознана — taxSystemCode не отправляем, "
+                "url_tilda=%s: система налогообложения %r от Tilda не распознана — taxSystemCode не отправляем, "
                 "банк подставит сам",
-                shop_id, taxation,
+                url_tilda, taxation,
             )
         else:
             logger.warning(
-                "shop_id=%s: Tilda сообщила систему налогообложения %r — отправляем банку код %s",
-                shop_id, taxation, tax_system_code,
+                "url_tilda=%s: Tilda сообщила систему налогообложения %r — отправляем банку код %s",
+                url_tilda, taxation, tax_system_code,
             )
 
     items = []
@@ -162,9 +162,9 @@ def _build_receipt(
                 # только если названия разошлись сильнее, чем просто
                 # добавленный вариант, — вдруг реально другой порядок.
                 logger.warning(
-                    "shop_id=%s: позиция %d — название в Receipt (%r) заметно отличается "
+                    "url_tilda=%s: позиция %d — название в Receipt (%r) заметно отличается "
                     "от названия в products (%r), проверьте порядок товаров",
-                    shop_id, idx, tilda_name, name,
+                    url_tilda, idx, tilda_name, name,
                 )
             mapped_tax = TAX_TO_TAX_RATE.get(tilda_item.get("tax"))
             mapped_type = PAYMENT_OBJECT_TO_TYPE.get(tilda_item.get("payment_object"))
@@ -177,21 +177,21 @@ def _build_receipt(
         # тем, что реально имел в виду продавец.
         if mapped_tax is None:
             logger.warning(
-                "shop_id=%s: товар %r — ставка НДС не определена из данных Tilda, "
+                "url_tilda=%s: товар %r — ставка НДС не определена из данных Tilda, "
                 "поле taxRate не отправляется, банк применит свой дефолт терминала",
-                shop_id, name,
+                url_tilda, name,
             )
         if mapped_type is None:
             logger.warning(
-                "shop_id=%s: товар %r — предмет расчёта не определён из данных Tilda, "
+                "url_tilda=%s: товар %r — предмет расчёта не определён из данных Tilda, "
                 "поле type не отправляется, банк применит свой дефолт терминала",
-                shop_id, name,
+                url_tilda, name,
             )
         if mapped_mode is None:
             logger.warning(
-                "shop_id=%s: товар %r — способ расчёта не определён из данных Tilda, "
+                "url_tilda=%s: товар %r — способ расчёта не определён из данных Tilda, "
                 "поле mode не отправляется, банк применит свой дефолт терминала",
-                shop_id, name,
+                url_tilda, name,
             )
 
         item = {
@@ -210,7 +210,7 @@ def _build_receipt(
     if not items:
         # Состав корзины не пришёл или не распарсился — не отправляем банку
         # пустой/битый чек, лучше вообще без receipt (сработают дефолты банка).
-        logger.warning("shop_id=%s: нет позиций для чека, receipt не отправляется", shop_id)
+        logger.warning("url_tilda=%s: нет позиций для чека, receipt не отправляется", url_tilda)
         return None
 
     receipt = {
@@ -223,9 +223,9 @@ def _build_receipt(
     return receipt
 
 
-@app.post("/tilda/{shop_id}/checkout")
+@app.post("/tilda/{url_tilda}/checkout")
 async def tilda_checkout(
-    shop_id: str,
+    url_tilda: str,
     login: str = Form(...),
     order_id: str = Form(...),
     order_amount: str = Form(...),
@@ -236,11 +236,11 @@ async def tilda_checkout(
 ):
     """
     Сюда Tilda перенаправляет браузер покупателя (POST) сразу после
-    оформления заказа в корзине КОНКРЕТНОЙ торговой точки shop_id —
+    оформления заказа в корзине КОНКРЕТНОЙ торговой точки url_tilda —
     именно этот адрес указывается в поле "API URL" при настройке
     Универсальной платёжной системы у данного клиента.
     """
-    tenant = _get_tenant_or_404(shop_id)
+    tenant = _get_tenant_or_404(url_tilda)
 
     if not verify_signature(tenant.tilda_order_secret, login, order_id, order_amount, signature):
         raise HTTPException(status_code=400, detail="Неверная подпись заказа от Tilda")
@@ -261,12 +261,12 @@ async def tilda_checkout(
         "currency": "RUB",
         "description": f"Заказ Tilda #{order_id}",
         "language": "ru",
-        "hppRedirectUrl": f"{settings.public_base_url}/tilda/{shop_id}/return?ref={order_id}",
+        "hppRedirectUrl": f"{settings.public_base_url}/tilda/{url_tilda}/return?ref={order_id}",
     }
     if client_email:
         order_payload["srcEmail"] = client_email
 
-    receipt = _build_receipt(tenant, shop_id, products, tilda_receipt, amount)
+    receipt = _build_receipt(tenant, url_tilda, products, tilda_receipt, amount)
     if receipt is not None:
         order_payload["receipt"] = receipt
 
@@ -274,8 +274,8 @@ async def tilda_checkout(
     bank_order_id = order["order"]["id"]
     password = order["order"]["password"]
 
-    db.save_order(shop_id, bank_order_id, password, amount)
-    db.save_tilda_link(order_id, shop_id, bank_order_id, amount)
+    db.save_order(url_tilda, bank_order_id, password, amount)
+    db.save_tilda_link(order_id, url_tilda, bank_order_id, amount)
 
     pay_url = f"{tenant.flex_host}?id={bank_order_id}&password={password}"
     return RedirectResponse(pay_url, status_code=302)
@@ -284,7 +284,7 @@ async def tilda_checkout(
 async def _notify_tilda_paid(tenant: db.Tenant, tilda_order_id: str, bank_order_id: int, amount: float) -> bool:
     """
     Отправляет Tilda уведомление об успешной оплате. Используется и из
-    /tilda/{shop_id}/return (когда покупатель вернулся в браузере), и из
+    /tilda/{url_tilda}/return (когда покупатель вернулся в браузере), и из
     фонового опроса poll_pending_payments (на случай, если не вернулся).
     Возвращает True, если уведомление отправлено и БД обновлена.
     """
@@ -306,8 +306,8 @@ async def _notify_tilda_paid(tenant: db.Tenant, tilda_order_id: str, bank_order_
         db.mark_tilda_link_notified(tilda_order_id)
         return True
     except httpx.RequestError as exc:
-        logger.warning("shop_id=%s: не удалось отправить уведомление Tilda по заказу %s: %s",
-                        tenant.shop_id, tilda_order_id, exc)
+        logger.warning("url_tilda=%s: не удалось отправить уведомление Tilda по заказу %s: %s",
+                        tenant.url_tilda, tilda_order_id, exc)
         return False
 
 
@@ -329,9 +329,9 @@ async def poll_pending_payments():
             continue
 
         for link in pending:
-            shop_id = link["shop_id"]
+            url_tilda = link["url_tilda"]
             try:
-                tenant = _get_tenant_or_404(shop_id)
+                tenant = _get_tenant_or_404(url_tilda)
                 order = db.get_order(link["bank_order_id"])
                 if order is None:
                     continue
@@ -340,20 +340,20 @@ async def poll_pending_payments():
                 if status == "FullyPaid":
                     ok = await _notify_tilda_paid(tenant, link["tilda_order_id"], link["bank_order_id"], link["amount"])
                     if ok:
-                        logger.warning("poll_pending_payments: заказ %s (shop_id=%s) оплачен, Tilda уведомлена",
-                                        link["tilda_order_id"], shop_id)
+                        logger.warning("poll_pending_payments: заказ %s (url_tilda=%s) оплачен, Tilda уведомлена",
+                                        link["tilda_order_id"], url_tilda)
             except Exception as exc:
-                logger.warning("poll_pending_payments: ошибка по заказу %s (shop_id=%s): %s",
-                                link["tilda_order_id"], shop_id, exc)
+                logger.warning("poll_pending_payments: ошибка по заказу %s (url_tilda=%s): %s",
+                                link["tilda_order_id"], url_tilda, exc)
 
 
-@app.get("/tilda/{shop_id}/return")
-async def tilda_return(shop_id: str, ref: str):
+@app.get("/tilda/{url_tilda}/return")
+async def tilda_return(url_tilda: str, ref: str):
     """Сюда банк возвращает покупателя после оплаты (hppRedirectUrl)."""
-    tenant = _get_tenant_or_404(shop_id)
+    tenant = _get_tenant_or_404(url_tilda)
 
     link = db.get_tilda_link(ref)
-    if link is None or link["shop_id"] != shop_id:
+    if link is None or link["url_tilda"] != url_tilda:
         return PlainTextResponse("Заказ не найден", status_code=404)
 
     order = db.get_order(link["bank_order_id"])
@@ -385,20 +385,20 @@ async def tilda_return(shop_id: str, ref: str):
 
 # ---------- Служебные операции (для вашей админки, не для Tilda напрямую) ----------
 
-@app.get("/api/{shop_id}/orders/{order_id}/status", dependencies=[Depends(require_admin)])
-async def get_status(shop_id: str, order_id: int, with_ofd: bool = False):
-    tenant = _get_tenant_or_404(shop_id)
+@app.get("/api/{url_tilda}/orders/{order_id}/status", dependencies=[Depends(require_admin)])
+async def get_status(url_tilda: str, order_id: int, with_ofd: bool = False):
+    tenant = _get_tenant_or_404(url_tilda)
     order = db.get_order(order_id)
-    if order is None or order["shop_id"] != shop_id:
+    if order is None or order["url_tilda"] != url_tilda:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     return await bank_client.get_order_status(tenant, order_id, order["password"], with_ofd=with_ofd)
 
 
-@app.post("/api/{shop_id}/orders/{order_id}/refund", dependencies=[Depends(require_admin)])
-async def refund_order(shop_id: str, order_id: int, amount: float):
-    tenant = _get_tenant_or_404(shop_id)
+@app.post("/api/{url_tilda}/orders/{order_id}/refund", dependencies=[Depends(require_admin)])
+async def refund_order(url_tilda: str, order_id: int, amount: float):
+    tenant = _get_tenant_or_404(url_tilda)
     order = db.get_order(order_id)
-    if order is None or order["shop_id"] != shop_id:
+    if order is None or order["url_tilda"] != url_tilda:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
     session = await bank_client.create_user_session(
@@ -413,11 +413,11 @@ async def refund_order(shop_id: str, order_id: int, amount: float):
     )
 
 
-@app.post("/api/{shop_id}/orders/{order_id}/void", dependencies=[Depends(require_admin)])
-async def void_paid_order(shop_id: str, order_id: int):
-    tenant = _get_tenant_or_404(shop_id)
+@app.post("/api/{url_tilda}/orders/{order_id}/void", dependencies=[Depends(require_admin)])
+async def void_paid_order(url_tilda: str, order_id: int):
+    tenant = _get_tenant_or_404(url_tilda)
     order = db.get_order(order_id)
-    if order is None or order["shop_id"] != shop_id:
+    if order is None or order["url_tilda"] != url_tilda:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
     session = await bank_client.create_user_session(
