@@ -151,7 +151,7 @@ ADMIN_HTML = """<!DOCTYPE html>
   th,td{text-align:left;padding:10px 12px;font-size:13px;border-bottom:1px solid var(--line);vertical-align:middle;}
   th{color:var(--ink-faint);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
   tr:last-child td{border-bottom:none;}
-  .row-actions{display:flex;gap:6px;}
+  .row-actions{display:flex;gap:6px;align-items:center;}
   .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
   .modal-bg{position:fixed;inset:0;background:rgba(20,20,20,.35);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;}
   .modal{background:var(--surface);border-radius:12px;padding:24px;max-width:520px;width:100%;box-shadow:0 12px 32px rgba(0,0,0,.12);}
@@ -427,9 +427,11 @@ function renderTable() {
       <td>${t.tsp_login}</td>
       <td>${t.bank_terminal_id}</td>
       <td>${t.inn || '<span style="color:var(--coral)">нет ИНН</span>'}</td>
-      <td class="row-actions">
-        <button class="btn-ghost" onclick="openForm('${t.url_tilda}')">Изменить</button>
-        <button class="btn-danger" onclick="removeTenant('${t.url_tilda}')">Удалить</button>
+      <td>
+        <div class="row-actions">
+          <button class="btn-ghost" onclick="openForm('${t.url_tilda}')">Изменить</button>
+          <button class="btn-danger" onclick="removeTenant('${t.url_tilda}')">Удалить</button>
+        </div>
       </td>
     </tr>
   `).join('');
