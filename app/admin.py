@@ -142,13 +142,13 @@ ADMIN_HTML = """<!DOCTYPE html>
   input, select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;background:#fff;color:var(--ink);}
   input::placeholder{color:var(--ink-faint);}
   label{display:block;font-size:13px;font-weight:600;color:var(--brand);margin:10px 0 5px;}
-  button{cursor:pointer;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;}
+  button{cursor:pointer;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;line-height:1.1;}
   .btn-primary{background:var(--brand);color:#fff;}
   .btn-primary:hover{background:var(--brand-dark);}
   .btn-ghost{background:transparent;color:var(--ink-dim);border:1px solid var(--line);}
   .btn-danger{background:var(--coral-dim);color:var(--coral);}
   table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
-  th,td{text-align:left;padding:10px 12px;font-size:13px;border-bottom:1px solid var(--line);}
+  th,td{text-align:left;padding:10px 12px;font-size:13px;border-bottom:1px solid var(--line);vertical-align:middle;}
   th{color:var(--ink-faint);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
   tr:last-child td{border-bottom:none;}
   .row-actions{display:flex;gap:6px;}
@@ -159,7 +159,10 @@ ADMIN_HTML = """<!DOCTYPE html>
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
   .hint{font-size:11.5px;color:var(--ink-faint);margin-top:3px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
-  .checkout-url{font-family:monospace;font-size:11.5px;background:#F7F8F9;border:1px dashed var(--line);padding:8px 10px;border-radius:6px;word-break:break-all;margin-top:6px;}
+  .checkout-url{font-family:monospace;font-size:11.5px;background:#F7F8F9;border:1px dashed var(--line);padding:8px 10px;border-radius:6px;word-break:break-all;margin-top:6px;cursor:pointer;transition:background .15s;}
+  .checkout-url:hover{background:#EEF0F2;border-color:var(--ink-faint);}
+  .checkout-url:active{background:#E3E7EA;}
+  .checkout-url.copied{background:#E9F7E6;border-color:var(--brand);color:var(--brand-dark);font-weight:700;}
   .hidden{display:none !important;}
   .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
@@ -360,6 +363,29 @@ function clearSearch() {
   onSearchChange();
 }
 
+async function copyCheckoutUrl(url, el) {
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch (e) {
+    // Резервный вариант, если Clipboard API недоступен (например, http без TLS)
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  const original = el.textContent;
+  el.textContent = 'Скопировано ✓';
+  el.classList.add('copied');
+  setTimeout(() => {
+    el.textContent = original;
+    el.classList.remove('copied');
+  }, 1200);
+}
+
 function goToPage(page) {
   currentPage = page;
   renderTable();
@@ -396,7 +422,7 @@ function renderTable() {
   const rows = pageItems.map(t => `
     <tr>
       <td><b>${t.terminal_number || '—'}</b></td>
-      <td><b>${t.url_tilda}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url">${t.checkout_url}</div></td>
+      <td><b>${t.url_tilda}</b><br><span style="color:var(--ink-faint)">${t.merchant_name || ''}</span><div class="checkout-url" title="Нажмите, чтобы скопировать" onclick="copyCheckoutUrl('${t.checkout_url}', this)">${t.checkout_url}</div></td>
       <td>${t.bank_env}</td>
       <td>${t.tsp_login}</td>
       <td>${t.bank_terminal_id}</td>
