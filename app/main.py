@@ -256,7 +256,7 @@ async def tilda_checkout(
     session_id = session["sessionId"]
 
     order_payload = {
-        "typeRid": "56",
+        "typeRid": tenant.type_rid,
         "amount": f"{amount:.2f}",
         "currency": "RUB",
         "description": f"Заказ Tilda #{order_id}",

@@ -37,6 +37,7 @@ class TenantIn(BaseModel):
     inn: str = ""
     merchant_name: str
     terminal_number: str
+    type_rid: str = "56"
 
 
 def _tenant_summary(tenant: db.Tenant) -> dict:
@@ -55,6 +56,7 @@ def _tenant_summary(tenant: db.Tenant) -> dict:
         "inn": tenant.inn,
         "merchant_name": tenant.merchant_name,
         "terminal_number": tenant.terminal_number,
+        "type_rid": tenant.type_rid,
         "checkout_url": f"{settings.public_base_url}/tilda/{tenant.url_tilda}/checkout",
     }
 
@@ -103,6 +105,7 @@ async def upsert_tenant_api(url_tilda: str, body: TenantIn):
         inn=body.inn.strip(),
         merchant_name=body.merchant_name.strip(),
         terminal_number=body.terminal_number.strip(),
+        type_rid=body.type_rid.strip() or "56",
     )
     return _tenant_summary(db.get_tenant(url_tilda))
 
@@ -239,6 +242,9 @@ ADMIN_HTML = """<!DOCTYPE html>
       <div><label>Номер терминала</label><input id="f_terminal_number" placeholder="T-00123"></div>
       <div><label>ИНН</label><input id="f_inn" placeholder="7727401209"></div>
     </div>
+    <label>Тип заказа (typeRid)</label>
+    <input id="f_type_rid" placeholder="56">
+    <div class="hint">Выдаёт банк — определяет способ оплаты/тип операции, так как Tilda его не передаёт.</div>
     <label>Пароль ТСП</label>
     <input id="f_tsp_password" type="password" placeholder="(оставьте пустым, чтобы не менять)">
 
@@ -461,6 +467,7 @@ async function openForm(shopId) {
   ids.forEach(id => document.getElementById('f_' + id).value = '');
   document.getElementById('f_url_tilda').value = '';
   document.getElementById('f_url_tilda').disabled = false;
+  document.getElementById('f_type_rid').value = '56';
 
   // Плейсхолдеры и выпадающие списки — сбрасываем к дефолтам новой точки.
   // Иначе при повторном открытии формы после редактирования другой точки
@@ -491,6 +498,7 @@ async function openForm(shopId) {
     document.getElementById('f_inn').value = t.inn;
     document.getElementById('f_merchant_name').value = t.merchant_name;
     document.getElementById('f_terminal_number').value = t.terminal_number;
+    document.getElementById('f_type_rid').value = t.type_rid;
     document.getElementById('f_tsp_password').placeholder = t.tsp_password_set
       ? '•••••• (задан — оставьте пустым, чтобы не менять)' : 'обязательно';
     document.getElementById('f_tilda_secret').placeholder = t.tilda_secret_set
@@ -569,6 +577,7 @@ async function saveTenant() {
     inn: document.getElementById('f_inn').value.trim(),
     merchant_name: document.getElementById('f_merchant_name').value.trim(),
     terminal_number: document.getElementById('f_terminal_number').value.trim(),
+    type_rid: document.getElementById('f_type_rid').value.trim() || '56',
   };
   try {
     showLoader();
